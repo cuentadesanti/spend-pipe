@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>spend-pipe</title>
+  <style>
+    :root { --bg:#0f1115; --card:#1a1d24; --line:#2b2f3a; --fg:#e6e8ec; --muted:#9aa2b1; --accent:#4f8cff; --warn:#e0a23c; --bad:#e05c5c; --ok:#4fb477; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+    header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; }
+    header a { color:var(--fg); text-decoration:none; font-weight:600; }
+    main { max-width:1100px; margin:0 auto; padding:20px; }
+    h1,h2,h3 { font-weight:600; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:18px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+    th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+    input,select,textarea { background:#12151b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 7px; font:inherit; }
+    input[type=text] { width:100%; }
+    textarea { width:100%; min-height:120px; font-family:ui-monospace,monospace; }
+    button, .btn { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; }
+    button.secondary { background:#2b2f3a; }
+    .muted { color:var(--muted); }
+    .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; }
+    .s-normalized { background:rgba(79,180,119,.15); color:var(--ok); }
+    .s-needs_review { background:rgba(224,162,60,.15); color:var(--warn); }
+    .s-approved { background:rgba(79,140,255,.15); color:var(--accent); }
+    .s-rejected { background:rgba(224,92,92,.15); color:var(--bad); }
+    .s-synced { background:rgba(154,162,177,.15); color:var(--muted); }
+    .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .neg { color:var(--bad); }
+    code, pre { background:#12151b; border:1px solid var(--line); border-radius:6px; }
+    code { padding:2px 6px; }
+    pre { padding:12px; overflow:auto; white-space:pre-wrap; }
+    .row { display:flex; gap:16px; flex-wrap:wrap; }
+    .row > .card { flex:1; min-width:320px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">spend-pipe</a>
+    <span class="muted">ingesta → staging → review → push a Actual</span>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

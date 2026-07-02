@@ -1,0 +1,12 @@
+{
+  "name": "spend-pipe-pusher",
+  "version": "0.1.0",
+  "description": "Worker fino: lee un batch aprobado de spend-pipe y lo empuja a Actual via importTransactions",
+  "type": "commonjs",
+  "scripts": {
+    "push": "node push.js"
+  },
+  "dependencies": {
+    "@actual-app/api": "^26.6.0"
+  }
+}

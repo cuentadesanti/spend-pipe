@@ -1,0 +1,22 @@
+# Secretos: NUNCA en git (lección de finanzas-ai/config.js en texto plano)
+.env
+*.db
+*.sqlite
+
+# Archivos crudos y artefactos
+/inbox/
+/artifacts/
+.actual-cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+
+.DS_Store

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="/" class="muted">← inicio</a></p>
+<h2>Batch <code>{{ batch.id }}</code>
+  <span class="pill s-{{ 'synced' if batch.status.value=='pushed' else 'approved' }}">{{ batch.status.value }}</span>
+</h2>
+<p class="muted">Aprobado por {{ batch.approved_by }} · {{ batch.approved_at.strftime("%Y-%m-%d %H:%M") if batch.approved_at }}</p>
+
+<div class="card">
+  <h3>Push a Actual</h3>
+  <p class="muted">Artefacto: <code>{{ artifact_path }}</code></p>
+  {% if batch.status.value != 'pushed' %}
+  <form action="/batches/{{ batch.id }}/push" method="post"
+        onsubmit="return confirm('Esto escribe en Actual (PikaPods). ¿Continuar?')">
+    <button type="submit">Push a Actual (--commit)</button>
+    <span class="muted" style="margin-left:10px">requiere <code>npm install</code> en node-pusher</span>
+  </form>
+  {% else %}
+  <p class="pill s-synced">ya empujado</p>
+  {% endif %}
+
+  {% if output %}
+  <h4 style="margin-bottom:6px">Salida del worker</h4>
+  <pre>{{ output }}</pre>
+  {% endif %}
+
+  <p class="muted" style="font-size:12px; margin-top:12px">Equivalente en CLI:<br>
+    <code>cd node-pusher && node push.js {{ artifact_path }} --commit</code></p>
+</div>
+
+<div class="card">
+  <h3>Transacciones ({{ txns|length }})</h3>
+  <table>
+    <thead><tr><th>Fecha</th><th>Payee (a Actual: crudo)</th><th>Categoría</th><th class="num">Monto</th><th>imported_id</th></tr></thead>
+    <tbody>
+      {% for t in txns %}
+      <tr>
+        <td class="muted">{{ t.date }}</td>
+        <td>{{ t.raw_payee }}</td>
+        <td class="muted">{{ t.category or '—' }}</td>
+        <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
+        <td class="muted" style="font-size:12px">{{ t.imported_id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

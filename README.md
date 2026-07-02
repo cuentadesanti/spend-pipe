@@ -1,0 +1,74 @@
+# spend-pipe
+
+Sistema de ingesta financiera, separado del budget app. Recibe archivos mensuales de
+bancos/tarjetas, los lleva a un schema común, normaliza/dedup, permite revisar y aprobar
+un batch, y hace bulk-upsert idempotente contra **Actual Budget** (PikaPods).
+
+```
+inbox → ingest → parse → normalize → [dedup] → staging (SQLite) → review web → approve
+                                                                         │ batch aprobado
+                                                        artifacts/batch-<id>.json
+                                                                         ▼
+                                          node-pusher/push.js → @actual-app/api → Actual
+```
+
+El **push es Node** (reusa `importTransactions`); todo lo de aguas arriba es **Python**.
+La frontera entre ambos es el artefacto `batch-<id>.json` (`schema_version` versionado).
+
+## Estado: MVP 1 (staging + review + push)
+
+Hecho y con tests: parsers (CSV genérico + manual), pipeline de normalización, identidad
+(`imported_id` con occurrence index + `dedup_hash`), staging, ingest idempotente, Web UI de
+review/aprobación, export del artefacto y worker Node de push. Ver `MVP 2–5` en las notas
+de diseño (dedup serio, categorías en-pipeline, migrar reglas de Actual, PDF BBVA robusto).
+
+## Setup
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env        # completá las credenciales de Actual (NO se commitean)
+```
+
+## Correr la Web UI
+
+```bash
+uvicorn spend_pipe.web.app:app --reload
+# http://127.0.0.1:8000
+```
+
+La app **aplica las migraciones de Alembic a `head` al arrancar** (Alembic es la fuente
+de verdad del schema). Para crear una migración nueva tras cambiar los modelos:
+
+```bash
+alembic revision --autogenerate -m "descripción"
+alembic upgrade head
+```
+
+Subís un CSV (o pegás filas manuales), revisás/editás payee·categoría·status, marcás
+duplicados, y aprobás → se escribe `artifacts/batch-<id>.json`.
+
+## Push a Actual
+
+```bash
+cd node-pusher && npm install
+node push.js ../artifacts/batch-<id>.json            # dry-run: solo muestra el plan
+node push.js ../artifacts/batch-<id>.json --commit   # escribe en Actual
+```
+
+El botón "Push a Actual" de la UI hace lo mismo (`--commit`) por vos.
+
+## Tests
+
+```bash
+pytest -q
+```
+
+## Notas
+
+- **Corte con finanzas-ai:** spend-pipe usa un formato de `imported_id` nuevo
+  (`spendpipe:...`), distinto al de los scripts one-off de `finanzas-ai`. spend-pipe es
+  dueño de los **meses nuevos**; no re-importar meses que finanzas-ai ya subió (duplicaría).
+- **MVP 1** manda el payee **crudo** a Actual para que sus 35 reglas sigan categorizando
+  post-import. Las categorías se mueven al pipeline recién en MVP 3–4.
+- Secretos solo por `.env` (fuera de git). Rotar la password de PikaPods si tocó un repo.

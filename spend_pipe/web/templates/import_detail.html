@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="/" class="muted">← inicio</a></p>
+<h2>{{ imp.source_bank }} · <span class="muted">{{ imp.source_file }}</span></h2>
+
+<div class="card">
+  <form action="/imports/{{ imp.id }}/save" method="post">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th><th>Payee crudo</th><th>Payee (normalizado, editable)</th>
+          <th>Categoría</th><th class="num">Monto</th><th>Estado</th><th>Dup</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in txns %}
+        <tr>
+          <td class="muted">{{ t.date }}</td>
+          <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:28] }}</td>
+          <td><input type="text" name="payee_{{ t.id }}" value="{{ t.payee or '' }}"></td>
+          <td><input type="text" name="category_{{ t.id }}" value="{{ t.category or '' }}" placeholder="(Actual categoriza)"></td>
+          <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
+          <td>
+            <select name="status_{{ t.id }}">
+              {% for s in statuses %}
+              <option value="{{ s }}" {{ 'selected' if t.status.value==s else '' }}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input type="checkbox" name="dup_{{ t.id }}" {{ 'checked' if t.is_duplicate else '' }}></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:14px; display:flex; gap:10px;">
+      <button type="submit" class="secondary">Guardar cambios</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Aprobar batch</h3>
+  <p class="muted">Se incluye solo lo que esté <span class="pill s-normalized">normalized</span> o
+     <span class="pill s-approved">approved</span> y no marcado como duplicado.
+     Las filas en <span class="pill s-needs_review">needs_review</span> (ej. Openbank
+     <b>AUTORIZADO</b>/pendientes) quedan <b>fuera</b> hasta que las revises y les cambies el estado.
+     Al aprobar se escribe el artefacto <code>batch-&lt;id&gt;.json</code> listo para el push.</p>
+  <form action="/imports/{{ imp.id }}/approve" method="post" onsubmit="return confirm('¿Aprobar y generar el batch?')">
+    <button type="submit">Aprobar → generar batch</button>
+  </form>
+</div>
+
+{% endblock %}

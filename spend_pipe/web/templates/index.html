@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row">
+  <div class="card">
+    <h3>Subir archivo (CSV / XLSX)</h3>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <label>Banco / fuente</label>
+      <input type="text" name="source_bank" placeholder="bbva-tdc" required>
+      <label>Formato</label>
+      <select name="format">
+        <option value="csv">csv</option>
+        <option value="xlsx">xlsx</option>
+        <option value="xls">xls (Openbank HTML)</option>
+      </select>
+      <label>Archivo</label>
+      <input type="file" name="file" required>
+      <p class="muted" style="font-size:12px">Parsers registrados:
+        {% for b, f in parsers %}<code>{{ b }}/{{ f }}</code> {% endfor %}</p>
+      <button type="submit">Ingerir</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Pegar manual (puente BBVA-PDF)</h3>
+    <form action="/manual" method="post">
+      <label>Banco / fuente</label>
+      <input type="text" name="source_bank" placeholder="bbva" required>
+      <label>Cuenta (nombre en Actual)</label>
+      <input type="text" name="source_account" placeholder="BBVA Cuenta Digital" required>
+      <label>Moneda</label>
+      <input type="text" name="currency" value="MXN">
+      <label>Filas (header + <code>date,amount,payee[,memo]</code>)</label>
+      <textarea name="pasted" placeholder="date,amount,payee&#10;2026-06-15,-1234.56,Uber"></textarea>
+      <button type="submit">Ingerir</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Imports</h3>
+  {% if imports %}
+  <table>
+    <thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th>Formato</th><th>Estado de filas</th><th></th></tr></thead>
+    <tbody>
+      {% for imp in imports %}
+      <tr>
+        <td class="muted">{{ imp.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ imp.source_bank }}</td>
+        <td class="muted">{{ imp.source_file }}</td>
+        <td>{{ imp.format }}</td>
+        <td>
+          {% for st, n in counts[imp.id].items() %}
+            <span class="pill s-{{ st }}">{{ st }}: {{ n }}</span>
+          {% endfor %}
+        </td>
+        <td><a class="btn secondary" href="/imports/{{ imp.id }}">Revisar</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Todavía no hay imports.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3>Batches</h3>
+  {% if batches %}
+  <table>
+    <thead><tr><th>Fecha</th><th>Batch</th><th>Estado</th><th>Aprobado por</th><th></th></tr></thead>
+    <tbody>
+      {% for b in batches %}
+      <tr>
+        <td class="muted">{{ b.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td><code>{{ b.id }}</code></td>
+        <td><span class="pill s-{{ 'synced' if b.status.value=='pushed' else 'approved' }}">{{ b.status.value }}</span></td>
+        <td>{{ b.approved_by or "" }}</td>
+        <td><a class="btn secondary" href="/batches/{{ b.id }}">Ver</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Todavía no hay batches.</p>{% endif %}
+</div>
+
+{% endblock %}
