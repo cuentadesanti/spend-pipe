@@ -1,30 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+  .split-panel-row { display:none; }
+  .split-panel-row.open { display:table-row; }
+  .split-panel { background:#12151b; border:1px dashed var(--line); border-radius:8px; padding:12px; }
+  .split-panel-head { display:flex; gap:12px; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .split-rows { display:grid; gap:8px; }
+  .split-row { display:grid; grid-template-columns:150px minmax(220px, 1fr) minmax(180px, 1fr) auto; gap:8px; align-items:center; }
+  .split-meta { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .split-error { color:var(--bad); font-size:12px; }
+  .split-ok { color:var(--ok); font-size:12px; }
+  .primary-category-wrap.is-hidden { display:none; }
+  .review-warning { color:var(--warn); font-size:12px; }
+  @media (max-width: 900px) {
+    .split-row { grid-template-columns:1fr; }
+  }
+</style>
+
 <p><a href="/" class="muted">← inicio</a></p>
 {% if detected %}
 <div class="card" style="border-color:var(--ok)">
-  ✓ <b>Detectado:</b> {{ detected }} — revisá y aprobá abajo.
+  ✓ <b>Detectado:</b> {{ detected }} — revisa y aprueba abajo.
 </div>
 {% endif %}
 <h2>{{ imp.source_bank }} · <span class="muted">{{ imp.source_file }}</span></h2>
 
-<div class="card">
-  <form action="/imports/{{ imp.id }}/save" method="post">
+<form action="/imports/{{ imp.id }}/save" method="post" id="review-form">
+  <div class="card">
     <table>
       <thead>
         <tr>
           <th>Fecha</th><th>Payee crudo</th><th>Payee (normalizado, editable)</th>
-          <th>Categoría</th><th class="num">Monto</th><th>Estado</th><th>Dup</th><th>⇄</th>
+          <th>Categoria</th><th class="num">Monto</th><th>Estado</th><th>Dup</th><th>⇄</th><th>✂</th>
         </tr>
       </thead>
       <tbody>
         {% for t in txns %}
+        {% set drafts = split_drafts.get(t.id, []) %}
         <tr>
           <td class="muted">{{ t.date }}</td>
           <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:28] }}</td>
           <td><input type="text" name="payee_{{ t.id }}" value="{{ t.payee or '' }}"></td>
-          <td><input type="text" name="category_{{ t.id }}" value="{{ t.category or '' }}" placeholder="(Actual categoriza)"></td>
+          <td>
+            <div id="primary_category_wrap_{{ t.id }}" class="primary-category-wrap {{ 'is-hidden' if drafts else '' }}">
+              <input type="text" id="category_{{ t.id }}" name="category_{{ t.id }}" value="{{ t.category or '' }}" placeholder="(sin categoria)">
+            </div>
+            {% if drafts %}
+            <span class="muted" style="font-size:12px">La categoria vive en los splits.</span>
+            {% endif %}
+          </td>
           <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
           <td>
             <select name="status_{{ t.id }}">
@@ -41,31 +66,204 @@
           <td>
             <input type="checkbox" name="transfer_{{ t.id }}" {{ 'checked' if t.is_transfer else '' }}
                    {{ 'disabled' if not t.is_transfer else '' }}
-                   title="{{ 'Transferencia detectada (par ' + (t.transfer_pair_id or '') + '); destildá si es falso positivo' if t.is_transfer else '' }}">
+                   title="{{ 'Transferencia detectada (par ' + (t.transfer_pair_id or '') + '); destilda si es falso positivo' if t.is_transfer else '' }}">
+          </td>
+          <td>
+            <button type="button" class="secondary split-toggle" data-txn-id="{{ t.id }}">
+              {{ 'Cerrar split' if drafts else 'Split' }}
+            </button>
+          </td>
+        </tr>
+        <tr id="split_panel_row_{{ t.id }}" class="split-panel-row {{ 'open' if drafts else '' }}">
+          <td colspan="9">
+            <div class="split-panel" data-txn-id="{{ t.id }}" data-parent-amount="{{ '%.2f'|format(t.amount) }}" data-is-transfer="{{ 'true' if t.is_transfer else 'false' }}">
+              <div class="split-panel-head">
+                <div>
+                  <b>Splits</b>
+                  <span class="muted">Suma exacta al centavo; conserva el signo del movimiento.</span>
+                </div>
+                <button type="button" class="secondary split-add" data-txn-id="{{ t.id }}" {{ 'disabled' if t.is_transfer else '' }}>+ Agregar split</button>
+              </div>
+              {% if t.is_transfer %}
+              <p class="review-warning" style="margin-top:0">Las transferencias no admiten splits.</p>
+              {% endif %}
+              <div id="split_rows_{{ t.id }}" class="split-rows">
+                {% for split in drafts %}
+                <div class="split-row">
+                  <input type="text" name="split_amount[{{ t.id }}][]" value="{{ split.amount }}" placeholder="-500.00">
+                  <input type="text" name="split_category[{{ t.id }}][]" value="{{ split.category }}" placeholder="Grupo / Categoria">
+                  <input type="text" name="split_notes[{{ t.id }}][]" value="{{ split.notes }}" placeholder="Notas del split (opcional)">
+                  <button type="button" class="secondary split-remove">Quitar</button>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="split-meta" style="margin-top:10px">
+                <span class="muted">Remanente: <b id="split_remainder_{{ t.id }}">0.00</b></span>
+                <span id="split_status_{{ t.id }}" class="{{ 'split-error' if split_errors.get(t.id) else 'split-ok' }}">
+                  {{ split_errors.get(t.id) or 'OK' }}
+                </span>
+              </div>
+            </div>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-    <div style="margin-top:14px; display:flex; gap:10px;">
-      <button type="submit" class="secondary">Guardar cambios</button>
-    </div>
-  </form>
-</div>
+  </div>
 
-<div class="card">
-  <h3>Aprobar batch</h3>
-  <p class="muted">Se incluye solo lo que esté <span class="pill s-normalized">normalized</span> o
-     <span class="pill s-approved">approved</span> y no marcado como duplicado.
-     Las filas en <span class="pill s-needs_review">needs_review</span> (ej. Openbank
-     <b>AUTORIZADO</b>/pendientes) quedan <b>fuera</b> hasta que las revises y les cambies el estado.
-     Los pares <b>⇄ transferencia</b> viajan como transferencia vinculada de Actual: se empuja la
-     pata negativa y la positiva queda <span class="pill s-synced">paired</span> (la representa la
-     contraparte que Actual crea).
-     Al aprobar se escribe el artefacto <code>batch-&lt;id&gt;.json</code> listo para el push.</p>
-  <form action="/imports/{{ imp.id }}/approve" method="post" onsubmit="return confirm('¿Aprobar y generar el batch?')">
-    <button type="submit">Aprobar → generar batch</button>
-  </form>
-</div>
+  <div class="card">
+    <h3>Aprobar batch</h3>
+    <p class="muted">Se incluye solo lo que esté <span class="pill s-normalized">normalized</span> o
+       <span class="pill s-approved">approved</span> y no marcado como duplicado.
+       Las filas en <span class="pill s-needs_review">needs_review</span> quedan fuera hasta que las revises.
+       Las transferencias viajan como linked transfer en Actual; los splits viajan como subtransactions
+       del padre y la categoria principal se ignora mientras existan rebanadas.</p>
+    <div class="row" style="align-items:center">
+      <button type="submit" class="secondary" id="review-save">Guardar cambios</button>
+      <button type="submit" formaction="/imports/{{ imp.id }}/approve" id="review-approve"
+              onclick="return confirm('¿Aprobar y generar el batch?')">Aprobar → generar batch</button>
+      <span id="review-form-warning" class="review-warning"></span>
+    </div>
+  </div>
+</form>
+
+<script>
+  function normalizeMoneyInput(value) {
+    return (value || '').trim().replace(/,/g, '');
+  }
+
+  function toCents(value) {
+    const normalized = normalizeMoneyInput(value);
+    if (!normalized) return null;
+    const num = Number(normalized);
+    if (!Number.isFinite(num)) return NaN;
+    return Math.round(num * 100);
+  }
+
+  function formatCents(cents) {
+    return (cents / 100).toFixed(2);
+  }
+
+  function buildSplitRow(txnId, amount = '', category = '', notes = '') {
+    const row = document.createElement('div');
+    row.className = 'split-row';
+    row.innerHTML = `
+      <input type="text" name="split_amount[${txnId}][]" value="${amount}" placeholder="-500.00">
+      <input type="text" name="split_category[${txnId}][]" value="${category}" placeholder="Grupo / Categoria">
+      <input type="text" name="split_notes[${txnId}][]" value="${notes}" placeholder="Notas del split (opcional)">
+      <button type="button" class="secondary split-remove">Quitar</button>
+    `;
+    return row;
+  }
+
+  function syncPrimaryCategory(panel) {
+    const txnId = panel.dataset.txnId;
+    const wrap = document.getElementById(`primary_category_wrap_${txnId}`);
+    const input = document.getElementById(`category_${txnId}`);
+    const hasSplits = panel.querySelectorAll('.split-row').length > 0;
+    wrap.classList.toggle('is-hidden', hasSplits);
+    input.disabled = hasSplits;
+  }
+
+  function recalcPanel(panel) {
+    const txnId = panel.dataset.txnId;
+    const rows = [...panel.querySelectorAll('.split-row')];
+    const parentCents = toCents(panel.dataset.parentAmount);
+    const remainderEl = document.getElementById(`split_remainder_${txnId}`);
+    const statusEl = document.getElementById(`split_status_${txnId}`);
+    let totalCents = 0;
+    let invalid = false;
+    let message = 'OK';
+
+    rows.forEach((row) => {
+      const amountInput = row.querySelector(`input[name="split_amount[${txnId}][]"]`);
+      const categoryInput = row.querySelector(`input[name="split_category[${txnId}][]"]`);
+      const cents = toCents(amountInput.value);
+      if (amountInput.value.trim() === '' || Number.isNaN(cents)) invalid = true;
+      else totalCents += cents;
+      if (categoryInput.value.trim() === '') invalid = true;
+    });
+
+    const remainder = parentCents - totalCents;
+    remainderEl.textContent = formatCents(remainder);
+
+    if (rows.length === 0) {
+      message = 'Sin splits';
+      statusEl.className = 'split-ok';
+    } else if (invalid) {
+      message = 'Completa montos y categorias validas.';
+      statusEl.className = 'split-error';
+    } else if (remainder !== 0) {
+      message = 'La suma no cuadra con el total.';
+      statusEl.className = 'split-error';
+      invalid = true;
+    } else {
+      statusEl.className = 'split-ok';
+    }
+
+    statusEl.textContent = message;
+    syncPrimaryCategory(panel);
+    return !invalid && remainder === 0;
+  }
+
+  function recalcAllPanels() {
+    const panels = [...document.querySelectorAll('.split-panel')];
+    const invalidPanels = panels.filter((panel) => !recalcPanel(panel));
+    const disable = invalidPanels.length > 0;
+    document.getElementById('review-save').disabled = disable;
+    document.getElementById('review-approve').disabled = disable;
+    document.getElementById('review-form-warning').textContent = disable
+      ? 'Corrige los splits antes de guardar o aprobar.'
+      : '';
+  }
+
+  function ensureInitialRows(panel) {
+    if (panel.dataset.isTransfer === 'true') return;
+    const txnId = panel.dataset.txnId;
+    const rows = panel.querySelector('.split-rows');
+    if (rows.querySelectorAll('.split-row').length === 0) {
+      rows.appendChild(buildSplitRow(txnId));
+      rows.appendChild(buildSplitRow(txnId));
+    }
+  }
+
+  document.addEventListener('click', (event) => {
+    const toggle = event.target.closest('.split-toggle');
+    if (toggle) {
+      const txnId = toggle.dataset.txnId;
+      const row = document.getElementById(`split_panel_row_${txnId}`);
+      const panel = row.querySelector('.split-panel');
+      row.classList.toggle('open');
+      if (row.classList.contains('open')) {
+        ensureInitialRows(panel);
+        toggle.textContent = 'Cerrar split';
+      } else {
+        toggle.textContent = panel.querySelectorAll('.split-row').length ? 'Split activo' : 'Split';
+      }
+      recalcAllPanels();
+      return;
+    }
+
+    const add = event.target.closest('.split-add');
+    if (add) {
+      const txnId = add.dataset.txnId;
+      document.getElementById(`split_rows_${txnId}`).appendChild(buildSplitRow(txnId));
+      recalcAllPanels();
+      return;
+    }
+
+    const remove = event.target.closest('.split-remove');
+    if (remove) {
+      remove.closest('.split-row').remove();
+      recalcAllPanels();
+    }
+  });
+
+  document.addEventListener('input', (event) => {
+    if (event.target.name && event.target.name.includes('split_')) recalcAllPanels();
+  });
+
+  recalcAllPanels();
+</script>
 
 {% endblock %}

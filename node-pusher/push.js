@@ -99,6 +99,7 @@ async function main() {
           destName: t.transfer_to_actual_account,
         });
       }
+      const hasSplits = Array.isArray(t.subtransactions) && t.subtransactions.length > 0;
       txns.push({
         date: t.date,
         amount: api.utils.amountToInteger(parseFloat(t.amount)),
@@ -107,13 +108,22 @@ async function main() {
         imported_id: t.imported_id,
         cleared: t.cleared !== false,
         // Categoría resuelta desde spend-pipe (reglas en-pipeline). Las transferencias
-        // no llevan categoría (la fase 2 las vincula).
-        category: t.transfer_to_actual_account ? undefined : await resolveCategory(t.category_name),
+        // no llevan categoría (la fase 2 las vincula). Los splits tampoco: la categoría
+        // vive en cada subtransaction.
+        category: (t.transfer_to_actual_account || hasSplits) ? undefined : await resolveCategory(t.category_name),
+        subtransactions: hasSplits
+          ? await Promise.all((t.subtransactions || []).map(async (split) => ({
+              amount: api.utils.amountToInteger(parseFloat(split.amount)),
+              notes: split.notes || undefined,
+              category: await resolveCategory(split.category_name),
+            })))
+          : undefined,
       });
     }
     console.log(`\n──── ${grp.actual_account_name}  (${txns.length} txns) ────`);
     for (const t of txns.slice(0, 5)) {
-      console.log(`  ${t.date}  ${String(api.utils.integerToAmount(t.amount)).padStart(11)}  ${(t.payee_name || '').slice(0, 30)}`);
+      const splitTag = t.subtransactions?.length ? `  [${t.subtransactions.length} splits]` : '';
+      console.log(`  ${t.date}  ${String(api.utils.integerToAmount(t.amount)).padStart(11)}  ${(t.payee_name || '').slice(0, 30)}${splitTag}`);
     }
     if (txns.length > 5) console.log(`  … (+${txns.length - 5} más)`);
     plan.push({ accountId, name: grp.actual_account_name, txns });

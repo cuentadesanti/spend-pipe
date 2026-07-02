@@ -28,6 +28,7 @@ from ..parsers import available_parsers
 from ..parsers.csv_generic import CsvColumnMap, GenericCsvParser
 from ..parsers.sniff import detect_file, header_signature
 from ..pipeline.transfers import unpair
+from ..splits import SplitDraft, parse_split_amount, replace_splits, serialize_splits, validate_splits
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ARTIFACTS_DIR = str(BASE_DIR / "artifacts")
@@ -53,6 +54,103 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _import_txns(db: Session, import_id: str) -> list[Transaction]:
+    return db.scalars(
+        select(Transaction).where(Transaction.import_id == import_id).order_by(Transaction.date, Transaction.created_at)
+    ).all()
+
+
+def _render_import_detail(
+    import_id: str,
+    request: Request,
+    db: Session,
+    detected: str = "",
+    split_errors: dict[str, str] | None = None,
+    split_drafts: dict[str, list[dict[str, str]]] | None = None,
+):
+    imp = db.get(Import, import_id)
+    txns = _import_txns(db, import_id)
+    drafts = {t.id: serialize_splits(t) for t in txns}
+    if split_drafts:
+        drafts.update(split_drafts)
+    return templates.TemplateResponse(
+        "import_detail.html",
+        {
+            "request": request,
+            "imp": imp,
+            "txns": txns,
+            "statuses": [s.value for s in EDITABLE_STATUS],
+            "detected": detected,
+            "split_errors": split_errors or {},
+            "split_drafts": drafts,
+        },
+    )
+
+
+def _split_rows_from_form(form, txn_id: str) -> list[dict[str, str]]:
+    amounts = form.getlist(f"split_amount[{txn_id}][]")
+    categories = form.getlist(f"split_category[{txn_id}][]")
+    notes = form.getlist(f"split_notes[{txn_id}][]")
+    size = max(len(amounts), len(categories), len(notes))
+    rows = []
+    for i in range(size):
+        rows.append(
+            {
+                "amount": amounts[i] if i < len(amounts) else "",
+                "category": categories[i] if i < len(categories) else "",
+                "notes": notes[i] if i < len(notes) else "",
+            }
+        )
+    return rows
+
+
+def _apply_review_form(
+    db: Session, txns: list[Transaction], form
+) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
+    split_errors: dict[str, str] = {}
+    split_drafts: dict[str, list[dict[str, str]]] = {}
+
+    for t in txns:
+        if (payee := form.get(f"payee_{t.id}")) is not None:
+            t.payee = payee.strip() or None
+        if (cat := form.get(f"category_{t.id}")) is not None:
+            t.category = cat.strip() or None
+        if (st := form.get(f"status_{t.id}")) in {s.value for s in EDITABLE_STATUS}:
+            t.status = TxnStatus(st)
+        t.is_duplicate = form.get(f"dup_{t.id}") == "on"
+        if t.is_transfer and form.get(f"transfer_{t.id}") != "on":
+            unpair(db, t)
+
+        raw_rows = _split_rows_from_form(form, t.id)
+        visible_rows = [row for row in raw_rows if any(v.strip() for v in row.values())]
+        split_drafts[t.id] = visible_rows
+        drafts: list[SplitDraft] = []
+        row_errors: list[str] = []
+        for row in visible_rows:
+            try:
+                amount = parse_split_amount(row["amount"])
+            except ValueError as e:
+                row_errors.append(str(e))
+                continue
+            drafts.append(
+                SplitDraft(
+                    amount=amount,
+                    category=(row["category"] or "").strip(),
+                    notes=(row["notes"] or "").strip() or None,
+                )
+            )
+        if row_errors:
+            split_errors[t.id] = " ".join(row_errors)
+            continue
+        business_errors = validate_splits(t, drafts)
+        if business_errors:
+            split_errors[t.id] = " ".join(dict.fromkeys(business_errors))
+            continue
+        replace_splits(t, drafts)
+
+    return split_errors, split_drafts
 
 
 # ── Home ───────────────────────────────────────────────────────────────────
@@ -196,44 +294,28 @@ def manual(
 # ── Review de un import ──────────────────────────────────────────────────────
 @app.get("/imports/{import_id}", response_class=HTMLResponse)
 def import_detail(import_id: str, request: Request, db: Session = Depends(get_db), detected: str = ""):
-    imp = db.get(Import, import_id)
-    txns = db.scalars(
-        select(Transaction).where(Transaction.import_id == import_id).order_by(Transaction.date)
-    ).all()
-    return templates.TemplateResponse(
-        "import_detail.html",
-        {
-            "request": request,
-            "imp": imp,
-            "txns": txns,
-            "statuses": [s.value for s in EDITABLE_STATUS],
-            "detected": detected,
-        },
-    )
+    return _render_import_detail(import_id, request, db, detected=detected)
 
 
 @app.post("/imports/{import_id}/save")
 async def save_import(import_id: str, request: Request, db: Session = Depends(get_db)):
     form = await request.form()
-    txns = db.scalars(select(Transaction).where(Transaction.import_id == import_id)).all()
-    for t in txns:
-        if (payee := form.get(f"payee_{t.id}")) is not None:
-            t.payee = payee.strip() or None
-        if (cat := form.get(f"category_{t.id}")) is not None:
-            t.category = cat.strip() or None
-        if (st := form.get(f"status_{t.id}")) in {s.value for s in EDITABLE_STATUS}:
-            t.status = TxnStatus(st)
-        t.is_duplicate = form.get(f"dup_{t.id}") == "on"
-        # Destildar ⇄ deshace el par en ambas patas (falso positivo del matching).
-        if t.is_transfer and form.get(f"transfer_{t.id}") != "on":
-            unpair(db, t)
+    txns = _import_txns(db, import_id)
+    split_errors, split_drafts = _apply_review_form(db, txns, form)
+    if split_errors:
+        return _render_import_detail(import_id, request, db, split_errors=split_errors, split_drafts=split_drafts)
     db.commit()
     return RedirectResponse(f"/imports/{import_id}", status_code=303)
 
 
 @app.post("/imports/{import_id}/approve")
-def approve_import(import_id: str, db: Session = Depends(get_db)):
-    imp = db.get(Import, import_id)
+async def approve_import(import_id: str, request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    txns_all = _import_txns(db, import_id)
+    split_errors, split_drafts = _apply_review_form(db, txns_all, form)
+    if split_errors:
+        return _render_import_detail(import_id, request, db, split_errors=split_errors, split_drafts=split_drafts)
+
     # Elegibles: solo lo revisado y listo (normalized o approved) y no duplicado.
     # needs_review (ej. Openbank AUTORIZADO/pendientes) queda fuera hasta revisión explícita.
     txns = db.scalars(

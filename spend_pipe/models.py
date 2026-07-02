@@ -22,6 +22,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from .schema import SCHEMA_VERSION
+
 
 def _enum(e):
     """Columna Enum que guarda el .value (ej. 'approved') y devuelve el miembro del enum."""
@@ -106,7 +108,7 @@ class Batch(Base):
     __tablename__ = "batches"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: _uuid("batch"))
-    schema_version: Mapped[str] = mapped_column(String, default="1.0")
+    schema_version: Mapped[str] = mapped_column(String, default=SCHEMA_VERSION)
     status: Mapped[BatchStatus] = mapped_column(_enum(BatchStatus), default=BatchStatus.open)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -163,6 +165,25 @@ class Transaction(Base):
 
     import_: Mapped["Import"] = relationship(back_populates="transactions")
     batch: Mapped["Batch"] = relationship(back_populates="transactions")
+    splits: Mapped[list["TransactionSplit"]] = relationship(
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+        order_by="TransactionSplit.position",
+    )
+
+
+class TransactionSplit(Base):
+    __tablename__ = "transaction_splits"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: _uuid("split"))
+    txn_id: Mapped[str] = mapped_column(ForeignKey("transactions.id"))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    category: Mapped[str] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    transaction: Mapped["Transaction"] = relationship(back_populates="splits")
 
 
 # Búsqueda típica del review: "¿qué quedó pendiente en este batch?"

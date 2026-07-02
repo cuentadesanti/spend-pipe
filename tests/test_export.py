@@ -70,7 +70,7 @@ def test_export_builds_grouped_artifact(tmp_path):
     openai = next(t for t in grp.transactions if "OPENAI" in t.metadata.raw_payee)
     assert openai.category_name == "Gastos fijos / Suscripciones"
     assert all(t.category_name is None for t in star)
-    assert art.schema_version == "1.1"
+    assert art.schema_version == "1.2"
 
     # El archivo escrito es JSON válido y recargable.
     path = write_artifact(art, str(tmp_path))

@@ -98,7 +98,7 @@ def test_export_marks_negative_leg_with_destination(tmp_path):
     art = build_batch_artifact(batch, [pago], approved_by="t", session=s)
     bt = art.accounts[0].transactions[0]
     assert bt.transfer_to_actual_account == "BBVA TDC"   # destino = cuenta del peer
-    assert art.schema_version == "1.1"
+    assert art.schema_version == "1.2"
 
 
 def test_unpair_clears_both_legs(tmp_path):

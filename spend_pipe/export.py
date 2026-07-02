@@ -13,6 +13,7 @@ from .models import Batch, Transaction, TxnStatus
 from .schema import (
     BatchAccountGroup,
     BatchArtifact,
+    BatchSubtransaction,
     BatchTransaction,
     BatchTransactionMeta,
 )
@@ -59,6 +60,7 @@ def _transfer_dest(txn: Transaction, session) -> str | None:
 
 
 def _to_batch_txn(txn: Transaction, session=None) -> BatchTransaction:
+    has_splits = len(txn.splits) > 0
     return BatchTransaction(
         spend_pipe_transaction_id=txn.id,
         date=txn.date,
@@ -71,8 +73,12 @@ def _to_batch_txn(txn: Transaction, session=None) -> BatchTransaction:
         notes=txn.notes,
         imported_id=txn.imported_id,
         cleared=True,
-        category_name=txn.category,  # null en MVP1
+        category_name=None if has_splits else txn.category,
         transfer_to_actual_account=_transfer_dest(txn, session),
+        subtransactions=[
+            BatchSubtransaction(amount=split.amount, category_name=split.category, notes=split.notes)
+            for split in txn.splits
+        ],
         metadata=BatchTransactionMeta(
             source_file=txn.source_file,
             source_row=txn.source_row,

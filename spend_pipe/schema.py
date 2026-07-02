@@ -12,8 +12,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-# 1.1: se agrega transfer_to_actual_account (transferencias entre cuentas propias).
-SCHEMA_VERSION = "1.1"
+# 1.2: se agregan subtransactions para splits en el import a Actual.
+SCHEMA_VERSION = "1.2"
 
 
 class CommonTransaction(BaseModel):
@@ -39,6 +39,12 @@ class BatchTransactionMeta(BaseModel):
     raw_payee: Optional[str] = None
 
 
+class BatchSubtransaction(BaseModel):
+    amount: Decimal
+    category_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class BatchTransaction(BaseModel):
     """Una transacción dentro del artefacto exportado hacia el worker Node."""
 
@@ -54,6 +60,7 @@ class BatchTransaction(BaseModel):
     # Pata negativa de una transferencia detectada: el worker le pone el transfer-payee
     # de esta cuenta y Actual auto-crea la contraparte vinculada.
     transfer_to_actual_account: Optional[str] = None
+    subtransactions: list[BatchSubtransaction] = Field(default_factory=list)
     metadata: BatchTransactionMeta = Field(default_factory=BatchTransactionMeta)
 
 

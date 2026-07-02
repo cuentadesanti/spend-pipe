@@ -39,10 +39,26 @@
         <td class="muted">{{ t.date }}</td>
         <td>{{ t.raw_payee }}{% if t.is_transfer and t.transfer_pair_id %}
           <span class="pill s-approved" style="font-size:11px">⇄ transfer</span>{% endif %}</td>
-        <td class="muted">{{ t.category or '—' }}</td>
+        <td class="muted">
+          {% if t.splits %}
+          {{ t.splits|length }} split(s)
+          {% else %}
+          {{ t.category or '—' }}
+          {% endif %}
+        </td>
         <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
         <td class="muted" style="font-size:12px">{{ t.imported_id }}</td>
       </tr>
+      {% if t.splits %}
+      <tr>
+        <td></td>
+        <td colspan="4" class="muted" style="font-size:12px">
+          {% for split in t.splits %}
+          <div>↳ {{ '%.2f'|format(split.amount) }} {{ t.currency }} · {{ split.category }}{% if split.notes %} · {{ split.notes }}{% endif %}</div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
