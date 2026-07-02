@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .identity import assign_imported_ids
+from .export import actual_account_name
+from .identity import assign_imported_ids, dedup_hash
 from .models import Import, ImportStatus, Transaction, TxnStatus
 from .parsers import get_parser
 from .parsers.manual import ManualParser
@@ -76,8 +77,12 @@ def _persist(
             notes=ct.notes,
             pending=ct.pending,
             imported_id=iid,
+            dedup_hash=dedup_hash(
+                actual_account_name(ct.source_account), ct.date.isoformat(), ct.amount
+            ),
         )
         run_pipeline(t)
+        _flag_cross_import_duplicate(session, import_.id, t)
         if t.status == TxnStatus.needs_review:
             needs_review += 1
         session.add(t)
@@ -92,6 +97,28 @@ def _persist(
         skipped_duplicates=skipped,
         needs_review=needs_review,
     )
+
+
+def _flag_cross_import_duplicate(session: Session, import_id: str, t: Transaction) -> None:
+    """Marca sospechas de duplicado CROSS-IMPORT (MVP2).
+
+    Un match de dedup_hash (cuenta destino + fecha + monto) contra una fila de OTRO
+    import es la misma transacción real llegando por dos fuentes/archivos (payee
+    escrito distinto → imported_id distinto → se colaría sin esto). Dentro del mismo
+    import NO se marca: dos compras idénticas el mismo día son legítimas (occ index).
+    La sospecha va a needs_review y queda excluida del approve hasta que la revises.
+    """
+    prior = session.scalars(
+        select(Transaction).where(
+            Transaction.dedup_hash == t.dedup_hash,
+            Transaction.import_id != import_id,
+            Transaction.is_duplicate.is_(False),
+        )
+    ).first()
+    if prior is not None:
+        t.is_duplicate = True
+        t.duplicate_of = prior.id
+        t.status = TxnStatus.needs_review
 
 
 def ingest_file(session: Session, file_path: str, source_bank: str, format: str) -> IngestResult:

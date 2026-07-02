@@ -36,8 +36,13 @@ ACCOUNT_MAP: dict[str, str] = {
 }
 
 
-def _actual_account_name(source_account: str) -> str:
+def actual_account_name(source_account: str) -> str:
+    """Cuenta destino en Actual para un source_account. También la usa el dedup:
+    dos fuentes que rutean a la misma cuenta deben poder chocar entre sí."""
     return ACCOUNT_MAP.get(source_account, source_account)
+
+
+_actual_account_name = actual_account_name  # alias interno
 
 
 def _to_batch_txn(txn: Transaction) -> BatchTransaction:

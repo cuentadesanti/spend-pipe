@@ -41,15 +41,16 @@ def test_imported_id_independent_of_normalization():
     assert before == after  # el raw no cambió aunque el normalizado pasara de 'Uber trip' a 'Uber'
 
 
-def test_dedup_hash_uses_normalized_payee():
-    # Dos fuentes escriben el comercio distinto en crudo pero igual normalizado → mismo dedup_hash.
-    h1 = dedup_hash("BBVA TDC", "2026-05-26", "-70.00", "Uber")
-    h2 = dedup_hash("BBVA TDC", "2026-05-26", "-70.00", "uber")
+def test_dedup_hash_is_payee_independent():
+    # La misma compra llega con payee distinto según la fuente (PDF agrega
+    # '; Tarjeta Digital ***3054') → el hash NO incluye payee y debe coincidir.
+    h1 = dedup_hash("BBVA TDC", "2026-05-26", "-70.00")
+    h2 = dedup_hash("bbva tdc", "2026-05-26", "-70.0")   # slug de cuenta + cents estables
     assert h1 == h2
 
 
 def test_dedup_hash_differs_from_imported_id():
     # Claves distintas para trabajos distintos.
     iid = imported_id("bbva-tdc", "2026-05-26", "-70.00", "UBER RIDE", 0)
-    dh = dedup_hash("bbva-tdc", "2026-05-26", "-70.00", "Uber")
+    dh = dedup_hash("bbva-tdc", "2026-05-26", "-70.00")
     assert iid != dh

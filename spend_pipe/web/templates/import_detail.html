@@ -33,7 +33,11 @@
               {% endfor %}
             </select>
           </td>
-          <td><input type="checkbox" name="dup_{{ t.id }}" {{ 'checked' if t.is_duplicate else '' }}></td>
+          <td>
+            <input type="checkbox" name="dup_{{ t.id }}" {{ 'checked' if t.is_duplicate else '' }}>
+            {% if t.duplicate_of %}<span class="muted" style="font-size:11px"
+              title="Sospecha: misma cuenta+fecha+monto que {{ t.duplicate_of }} (otro archivo/fuente)">≈ dup</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

@@ -82,11 +82,15 @@ def assign_imported_ids(rows: Iterable[tuple]) -> list[str]:
     return out
 
 
-def dedup_hash(account: str, date_iso: str, amount, normalized_payee: str | None) -> str:
+def dedup_hash(account: str, date_iso: str, amount) -> str:
     """Hash interno para detección de duplicados cross-source (MVP2).
 
-    Usa el payee NORMALIZADO a propósito: dos fuentes distintas escriben el mismo
-    comercio de forma diferente en crudo, pero deberían normalizar igual.
+    Clave candidata = (cuenta DESTINO, fecha, monto) — sin payee, a propósito: la
+    misma compra llega con el payee escrito distinto según la fuente (el PDF de TDC
+    agrega '; Tarjeta Digital ***3054', el extracto resume el comercio), así que el
+    payee no puede ser parte del hash. Es señal para el review, no para la clave.
+    La cuenta debe ser la DESTINO en Actual (post-ACCOUNT_MAP): dos fuentes que
+    rutean a la misma cuenta (extracto Openbank vs tarjeta de débito) deben chocar.
     """
-    basis = f"{account}|{date_iso}|{amount_to_cents(amount)}|{canonicalize_payee(normalized_payee)}"
+    basis = f"{slug(account)}|{date_iso}|{amount_to_cents(amount)}"
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
