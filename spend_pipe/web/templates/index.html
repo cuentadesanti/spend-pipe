@@ -142,6 +142,14 @@
     letter-spacing: 0.05em;
   }
 
+  .bank-last-load {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+    margin-top: 5px;
+    display: block;
+  }
+
   .bank-status-row {
     display: flex;
     align-items: center;
@@ -334,6 +342,7 @@
       <div class="bank-meta">
         <h3 class="bank-title">{{ item.name }}</h3>
         <span class="bank-format">{{ item.formats_label }}</span>
+        <span class="bank-last-load">{{ item.last_load_label }}</span>
       </div>
       <div class="bank-status-row">
         {% if is_ready %}

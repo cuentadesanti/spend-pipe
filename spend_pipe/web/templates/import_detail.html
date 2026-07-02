@@ -258,6 +258,20 @@
     cursor: not-allowed;
     border: 1px solid var(--line);
   }
+
+  /* Progress Fade out Styles */
+  .txn-row {
+    transition: all 0.35s ease;
+  }
+
+  .txn-row.resolved-hidden {
+    opacity: 0 !important;
+    display: none !important;
+  }
+
+  .txn-row.resolved-visible {
+    opacity: 0.4 !important;
+  }
 </style>
 
 <div class="detail-nav">
@@ -333,8 +347,21 @@
             <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:24] }}</td>
             <td><input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
                 style="padding: 4px 8px; font-size:12.5px;"></td>
-            <td><input type="text" name="category_{{ t.id }}" class="clean-input" value="{{ t.category or '' }}"
-                style="padding: 4px 8px; font-size:12.5px;"></td>
+            <td>
+              <select name="category_{{ t.id }}" class="clean-input" style="padding: 4px 8px; font-size:12.5px;">
+                <option value="">— Sin categoría —</option>
+                {% for group, cats in categories_by_group.items() %}
+                <optgroup label="{{ group }}">
+                  {% for cat in cats %}
+                  <option value="{{ group }} / {{ cat.name }}" {{ 'selected' if t.category==group ~ ' / ' ~ cat.name
+                    else '' }}>
+                    {{ cat.name }}
+                  </option>
+                  {% endfor %}
+                </optgroup>
+                {% endfor %}
+              </select>
+            </td>
             <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight:600;">{{ '%.2f'|format(t.amount) }}
             </td>
             <td>
@@ -359,8 +386,14 @@
   {% endif %}
 
   <!-- 2. Surgery Table (Needs Review - Exceptional Items) -->
-  <div class="surgery-section-header">
-    Bandeja de Excepciones (<span id="exceptions-header-count">{{ ns.needs_review_count }}</span> pendientes)
+  <div class="surgery-section-header"
+    style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+    <div>Bandeja de Excepciones (<span id="exceptions-header-count">{{ ns.needs_review_count }}</span> pendientes)</div>
+    <label
+      style="font-size:13px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-weight:normal; text-transform:none; color:var(--muted);">
+      <input type="checkbox" id="show-resolved-exceptions" onchange="filterExceptions()" style="margin:0;"> Mostrar
+      resueltas
+    </label>
   </div>
 
   <div class="card" style="padding:0; overflow:hidden; border-radius:10px;">
@@ -395,8 +428,20 @@
           <td>
             <div id="primary_category_wrap_{{ t.id }}"
               class="primary-category-wrap {{ 'is-hidden' if drafts else '' }}">
-              <input type="text" id="category_{{ t.id }}" name="category_{{ t.id }}" class="clean-input"
-                value="{{ t.category or '' }}" placeholder="Grupo / Categoría">
+              <select id="category_{{ t.id }}" name="category_{{ t.id }}" class="clean-input"
+                onchange="onCategoryChange(this)">
+                <option value="">— Sin categoría —</option>
+                {% for group, cats in categories_by_group.items() %}
+                <optgroup label="{{ group }}">
+                  {% for cat in cats %}
+                  <option value="{{ group }} / {{ cat.name }}" {{ 'selected' if t.category==group ~ ' / ' ~ cat.name
+                    else '' }}>
+                    {{ cat.name }}
+                  </option>
+                  {% endfor %}
+                </optgroup>
+                {% endfor %}
+              </select>
             </div>
             {% if drafts %}
             <div class="muted" style="font-size:11px; font-weight:600; padding:4px 0;">La categoría vive en los splits.
@@ -459,8 +504,19 @@
                 <div class="split-row">
                   <input type="text" name="split_amount[{{ t.id }}][]" class="clean-input" value="{{ split.amount }}"
                     placeholder="-500.00">
-                  <input type="text" name="split_category[{{ t.id }}][]" class="clean-input"
-                    value="{{ split.category }}" placeholder="Grupo / Categoria">
+                  <select name="split_category[{{ t.id }}][]" class="clean-input">
+                    <option value="">— Sin categoría —</option>
+                    {% for group, cats in categories_by_group.items() %}
+                    <optgroup label="{{ group }}">
+                      {% for cat in cats %}
+                      <option value="{{ group }} / {{ cat.name }}" {{ 'selected' if split.category==group ~ ' / ' ~
+                        cat.name else '' }}>
+                        {{ cat.name }}
+                      </option>
+                      {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                  </select>
                   <input type="text" name="split_notes[{{ t.id }}][]" class="clean-input"
                     value="{{ split.notes or '' }}" placeholder="Comentarios split (opcional)">
                   <button type="button" class="secondary split-remove"
@@ -529,15 +585,32 @@
     return (cents / 100).toFixed(2);
   }
 
+  const CATEGORY_OPTIONS_HTML = `
+    <option value="">— Sin categoría —</option>
+    {% for group, cats in categories_by_group.items() %}
+      <optgroup label="{{ group }}">
+        {% for cat in cats %}
+          <option value="{{ group }} / {{ cat.name }}">{{ cat.name }}</option>
+        {% endfor %}
+      </optgroup>
+    {% endfor %}
+  `;
+
   function buildSplitRow(txnId, amount = '', category = '', notes = '') {
     const row = document.createElement('div');
     row.className = 'split-row';
     row.innerHTML = `
       <input type="text" name="split_amount[${txnId}][]" class="clean-input" value="${amount}" placeholder="-500.00">
-      <input type="text" name="split_category[${txnId}][]" class="clean-input" value="${category}" placeholder="Grupo / Categoria">
+      <select name="split_category[${txnId}][]" class="clean-input">
+        ${CATEGORY_OPTIONS_HTML}
+      </select>
       <input type="text" name="split_notes[${txnId}][]" class="clean-input" value="${notes}" placeholder="Comentarios split (opcional)">
       <button type="button" class="secondary split-remove" style="color:var(--bad); font-size:11px; padding:4px 8px;">Quitar</button>
     `;
+    if (category) {
+      const sel = row.querySelector('select');
+      if (sel) sel.value = category;
+    }
     return row;
   }
 
@@ -564,7 +637,7 @@
 
     rows.forEach((row) => {
       const amountInput = row.querySelector(`input[name="split_amount[${txnId}][]"]`);
-      const categoryInput = row.querySelector(`input[name="split_category[${txnId}][]"]`);
+      const categoryInput = row.querySelector(`[name="split_category[${txnId}][]"]`);
       const cents = toCents(amountInput.value);
       if (amountInput.value.trim() === '' || Number.isNaN(cents)) invalid = true;
       else totalCents += cents;
@@ -671,7 +744,59 @@
       }
     }
 
+    filterExceptions();
     recalcAllPanels();
+  }
+
+  function onCategoryChange(selectEl) {
+    const row = selectEl.closest('.txn-row') || selectEl.closest('tr');
+    if (!row) return;
+    const statusSelect = row.querySelector('select[name^="status_"]');
+    if (selectEl.value !== "" && statusSelect && statusSelect.value === 'needs_review') {
+      statusSelect.value = 'approved';
+      row.classList.remove('status-rejected-row');
+      row.classList.add('status-approved-row');
+    }
+    updateSyncStates();
+  }
+
+  function filterExceptions() {
+    const showResolved = document.getElementById('show-resolved-exceptions')?.checked || false;
+    const rows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')];
+
+    rows.forEach(row => {
+      const statusSelect = row.querySelector('select[name^="status_"]');
+      const dupCheck = row.querySelector('input[name^="dup_"]');
+      const isResolved = (statusSelect && (statusSelect.value === 'approved' || statusSelect.value === 'rejected')) || (dupCheck && dupCheck.checked);
+
+      const txnId = row.dataset.txnId;
+      const splitRow = document.getElementById(`split_panel_row_${txnId}`);
+
+      if (isResolved) {
+        row.classList.add('is-resolved');
+        if (showResolved) {
+          row.classList.remove('resolved-hidden');
+          row.classList.add('resolved-visible');
+          if (splitRow && splitRow.classList.contains('open')) {
+            splitRow.style.display = '';
+          }
+        } else {
+          row.classList.add('resolved-hidden');
+          row.classList.remove('resolved-visible');
+          if (splitRow) {
+            splitRow.style.display = 'none';
+          }
+        }
+      } else {
+        row.classList.remove('is-resolved', 'resolved-hidden', 'resolved-visible');
+        if (splitRow && splitRow.classList.contains('open')) {
+          splitRow.style.display = '';
+        }
+      }
+    });
+
+    // Actualizar indices de atajos de teclado para que ignore resolved-hidden
+    updateTxnRowsList();
   }
 
   function ensureInitialRows(panel) {

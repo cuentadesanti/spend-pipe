@@ -77,6 +77,12 @@ def _render_import_detail(
     drafts = {t.id: serialize_splits(t) for t in txns}
     if split_drafts:
         drafts.update(split_drafts)
+        
+    categories = get_actual_categories()
+    categories_by_group = {}
+    for cat in categories:
+        categories_by_group.setdefault(cat["group_name"], []).append(cat)
+
     return templates.TemplateResponse(
         request=request,
         name="import_detail.html",
@@ -88,6 +94,7 @@ def _render_import_detail(
             "detected": detected,
             "split_errors": split_errors or {},
             "split_drafts": drafts,
+            "categories_by_group": categories_by_group,
         },
     )
 
@@ -154,6 +161,39 @@ def _apply_review_form(
         replace_splits(t, drafts)
 
     return split_errors, split_drafts
+
+
+_CATEGORIES_CACHE: list[dict] = []
+
+def get_actual_categories() -> list[dict]:
+    global _CATEGORIES_CACHE
+    if _CATEGORIES_CACHE:
+        return _CATEGORIES_CACHE
+    try:
+        proc = subprocess.run(
+            ["node", "get_categories.js"],
+            cwd=str(NODE_PUSHER),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if proc.returncode == 0:
+            lines = proc.stdout.splitlines()
+            json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
+            if json_line:
+                _CATEGORIES_CACHE = json.loads(json_line[0])
+                return _CATEGORIES_CACHE
+    except Exception as e:
+        print(f"Error fetching actual categories: {e}")
+        
+    return [
+        {"name": "Comida fuera", "group_name": "Gastos variables"},
+        {"name": "Suscripciones", "group_name": "Gastos fijos"},
+        {"name": "Supermercado", "group_name": "Gastos variables"},
+        {"name": "Transporte", "group_name": "Gastos variables"},
+        {"name": "Luz / Electricidad", "group_name": "Servicios"},
+        {"name": "Internet", "group_name": "Servicios"},
+    ]
 
 
 _ACCOUNTS_CACHE: list[dict] = []
@@ -296,6 +336,40 @@ def index(request: Request, month: str = None, db: Session = Depends(get_db)):
             else:
                 status = "ready"
                 status_label = f"Al día ({approved_or_synced} txns)"
+
+            # REGLA ESTRICTA DE UI (Cero IDs Técnicos): Obtener último import exitoso
+            last_imp = db.scalars(
+                select(Import)
+                .join(Transaction)
+                .where(Transaction.source_account.in_(info["source_accounts"]))
+                .order_by(Import.created_at.desc())
+                .limit(1)
+            ).first()
+
+            if last_imp:
+                now_val = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                created_at = last_imp.created_at.replace(tzinfo=None) if last_imp.created_at.tzinfo else last_imp.created_at
+                diff = now_val - created_at
+                if diff.days == 0:
+                    if diff.seconds < 3600:
+                        time_str = "hace unos minutos" if diff.seconds < 120 else f"hace {diff.seconds // 60} minutos"
+                    else:
+                        time_str = f"hace {diff.seconds // 3600} horas"
+                elif diff.days == 1:
+                    time_str = "ayer"
+                else:
+                    time_str = f"hace {diff.days} días"
+
+                fn = last_imp.source_file
+                if "/" in fn:
+                    fn = fn.split("/")[-1]
+                if "\\" in fn:
+                    fn = fn.split("\\")[-1]
+                if len(fn) > 28:
+                    fn = fn[:25] + "..."
+                last_load_label = f"Última carga: {time_str} ({fn})"
+            else:
+                last_load_label = "Sin cargas registradas"
                 
             grid_items.append({
                 "id": info["id"],
@@ -304,6 +378,7 @@ def index(request: Request, month: str = None, db: Session = Depends(get_db)):
                 "formats_label": info["formats_label"],
                 "status": status,
                 "status_label": status_label,
+                "last_load_label": last_load_label,
             })
             
     # Garantizar que siempre se muestren las 3 cuentas minimas por si falla el API de Actual
@@ -316,6 +391,7 @@ def index(request: Request, month: str = None, db: Session = Depends(get_db)):
                 "formats_label": info["formats_label"],
                 "status": "pending",
                 "status_label": "Pendiente",
+                "last_load_label": "Sin cargas registradas",
             })
             
     return templates.TemplateResponse(
