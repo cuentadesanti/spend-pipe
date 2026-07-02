@@ -5,7 +5,7 @@ bancos/tarjetas, los lleva a un schema común, normaliza/dedup, permite revisar 
 un batch, y hace bulk-upsert idempotente contra **Actual Budget** (PikaPods).
 
 ```
-inbox → ingest → parse → normalize → [dedup] → staging (SQLite) → review web → approve
+inbox → ingest → parse → normalize → [dedup] → staging (SQLite/Postgres) → review web → approve
                                                                          │ batch aprobado
                                                         artifacts/batch-<id>.json
                                                                          ▼
@@ -30,6 +30,10 @@ pip install -e ".[dev]"
 cp .env.example .env        # completá las credenciales de Actual (NO se commitean)
 ```
 
+Local por defecto usa `sqlite:///./spend_pipe.db`. En producción podés pasar
+`SPENDPIPE_DATABASE_URL` apuntando a PostgreSQL/Supabase y, opcionalmente,
+`SPENDPIPE_STORAGE_PATH` para mover `inbox/` y `artifacts/` a un volumen persistente.
+
 ## Correr la Web UI
 
 ```bash
@@ -47,6 +51,41 @@ alembic upgrade head
 
 Subís un CSV (o pegás filas manuales), revisás/editás payee·categoría·status, marcás
 duplicados, y aprobás → se escribe `artifacts/batch-<id>.json`.
+
+## Deploy: Railway + Supabase
+
+Variables de entorno mínimas:
+
+```bash
+SPENDPIPE_DATABASE_URL=postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
+SPENDPIPE_STORAGE_PATH=/data
+SPENDPIPE_ACTUAL_SERVER_URL=...
+SPENDPIPE_ACTUAL_PASSWORD=...
+SPENDPIPE_ACTUAL_SYNC_ID=...
+```
+
+Notas:
+
+- `SPENDPIPE_DATABASE_URL` acepta `postgres://...` o `postgresql://...`; la app lo
+  normaliza al driver `psycopg` para SQLAlchemy/Alembic.
+- Si definís `SPENDPIPE_STORAGE_PATH`, la app usa `<storage>/inbox` y
+  `<storage>/artifacts` por defecto. También podés sobrescribirlos con
+  `SPENDPIPE_INBOX_DIR` y `SPENDPIPE_ARTIFACTS_DIR`.
+- Railway puede montar un volumen persistente en `/data`; el `Dockerfile` ya deja ese
+  path como default dentro del contenedor.
+
+Build/Run:
+
+```bash
+docker build -t spend-pipe .
+docker run --rm -p 8000:8000 \
+  -e SPENDPIPE_DATABASE_URL=postgresql://... \
+  -e SPENDPIPE_STORAGE_PATH=/data \
+  -e SPENDPIPE_ACTUAL_SERVER_URL=... \
+  -e SPENDPIPE_ACTUAL_PASSWORD=... \
+  -e SPENDPIPE_ACTUAL_SYNC_ID=... \
+  spend-pipe
+```
 
 ## Push a Actual
 

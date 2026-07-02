@@ -119,7 +119,7 @@ def build_batch_artifact(
 
 def write_artifact(artifact: BatchArtifact, artifacts_dir: str | None = None) -> str:
     """Escribe batch-<id>.json y devuelve la ruta. El worker Node lo lee desde ahí."""
-    out_dir = artifacts_dir or settings.artifacts_dir
+    out_dir = artifacts_dir or str(settings.resolved_artifacts_dir)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"batch-{artifact.batch_id}.json")
     with open(path, "w", encoding="utf-8") as f:

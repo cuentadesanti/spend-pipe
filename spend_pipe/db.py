@@ -1,4 +1,4 @@
-"""Engine y sesión de SQLAlchemy sobre SQLite."""
+"""Engine y sesión de SQLAlchemy."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +11,15 @@ from .models import Base
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-engine = create_engine(settings.database_url, future=True)
+
+def _engine_kwargs() -> dict:
+    kwargs = {"future": True, "pool_pre_ping": True}
+    if settings.is_sqlite:
+        kwargs["connect_args"] = {"check_same_thread": False}
+    return kwargs
+
+
+engine = create_engine(settings.sqlalchemy_database_url, **_engine_kwargs())
 SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False, future=True)
 
 

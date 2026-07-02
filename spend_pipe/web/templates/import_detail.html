@@ -190,6 +190,9 @@
     if (rows.length === 0) {
       message = 'Sin splits';
       statusEl.className = 'split-ok';
+      statusEl.textContent = message;
+      syncPrimaryCategory(panel);
+      return true;
     } else if (invalid) {
       message = 'Completa montos y categorias validas.';
       statusEl.className = 'split-error';

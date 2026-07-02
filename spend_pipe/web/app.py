@@ -31,8 +31,8 @@ from ..pipeline.transfers import unpair
 from ..splits import SplitDraft, parse_split_amount, replace_splits, serialize_splits, validate_splits
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-ARTIFACTS_DIR = str(BASE_DIR / "artifacts")
-INBOX_DIR = BASE_DIR / "inbox"
+ARTIFACTS_DIR = str(settings.resolved_artifacts_dir)
+INBOX_DIR = settings.resolved_inbox_dir
 NODE_PUSHER = BASE_DIR / "node-pusher"
 
 app = FastAPI(title="spend-pipe")
@@ -45,7 +45,9 @@ EDITABLE_STATUS = [TxnStatus.normalized, TxnStatus.needs_review, TxnStatus.appro
 @app.on_event("startup")
 def _startup() -> None:
     upgrade_to_head()  # Alembic como fuente de verdad del schema
+    settings.storage_root.mkdir(parents=True, exist_ok=True)
     INBOX_DIR.mkdir(exist_ok=True)
+    settings.resolved_artifacts_dir.mkdir(exist_ok=True)
 
 
 def get_db():
@@ -76,8 +78,9 @@ def _render_import_detail(
     if split_drafts:
         drafts.update(split_drafts)
     return templates.TemplateResponse(
-        "import_detail.html",
-        {
+        request=request,
+        name="import_detail.html",
+        context={
             "request": request,
             "imp": imp,
             "txns": txns,
@@ -168,8 +171,9 @@ def index(request: Request, db: Session = Depends(get_db)):
         counts[imp.id] = {s.value: n for s, n in rows}
     batches = db.scalars(select(Batch).order_by(Batch.created_at.desc())).all()
     return templates.TemplateResponse(
-        "index.html",
-        {
+        request=request,
+        name="index.html",
+        context={
             "request": request,
             "imports": imports,
             "counts": counts,
@@ -222,8 +226,9 @@ def upload(request: Request, file: UploadFile = File(...), db: Session = Depends
 
     # 3. Sin ingesta directa → pantalla de diagnóstico (con form de mapeo si es CSV).
     return templates.TemplateResponse(
-        "detect.html",
-        {"request": request, "det": det, "file_path": str(dest), "filename": dest.name},
+        request=request,
+        name="detect.html",
+        context={"request": request, "det": det, "file_path": str(dest), "filename": dest.name},
     )
 
 
@@ -356,8 +361,9 @@ def batch_detail(batch_id: str, request: Request, db: Session = Depends(get_db),
     txns = db.scalars(select(Transaction).where(Transaction.batch_id == batch_id).order_by(Transaction.date)).all()
     artifact_path = Path(ARTIFACTS_DIR) / f"batch-{batch_id}.json"
     return templates.TemplateResponse(
-        "batch_detail.html",
-        {
+        request=request,
+        name="batch_detail.html",
+        context={
             "request": request,
             "batch": batch,
             "txns": txns,
@@ -388,8 +394,9 @@ def push_batch(batch_id: str, request: Request, db: Session = Depends(get_db)):
     except Exception as e:  # noqa: BLE001
         output = f"No se pudo ejecutar el worker Node: {e}\n(¿Corriste `npm install` en node-pusher?)"
     return templates.TemplateResponse(
-        "batch_detail.html",
-        {
+        request=request,
+        name="batch_detail.html",
+        context={
             "request": request,
             "batch": db.get(Batch, batch_id),
             "txns": db.scalars(select(Transaction).where(Transaction.batch_id == batch_id).order_by(Transaction.date)).all(),

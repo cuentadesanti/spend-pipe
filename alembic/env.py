@@ -8,7 +8,7 @@ from spend_pipe.config import settings
 from spend_pipe.models import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -17,12 +17,16 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    configure_kwargs = {
+        "url": settings.sqlalchemy_database_url,
+        "target_metadata": target_metadata,
+        "literal_binds": True,
+        "dialect_opts": {"paramstyle": "named"},
+    }
+    if settings.is_sqlite:
+        configure_kwargs["render_as_batch"] = True
     context.configure(
-        url=settings.database_url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,  # SQLite: permite ALTER via batch (clave para MVP2+)
+        **configure_kwargs,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -35,11 +39,13 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            render_as_batch=True,  # SQLite: ALTER TABLE via recreación de tabla
-        )
+        configure_kwargs = {
+            "connection": connection,
+            "target_metadata": target_metadata,
+        }
+        if settings.is_sqlite:
+            configure_kwargs["render_as_batch"] = True
+        context.configure(**configure_kwargs)
         with context.begin_transaction():
             context.run_migrations()
 
