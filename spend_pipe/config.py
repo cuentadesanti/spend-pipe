@@ -19,10 +19,37 @@ def _resolve_path(raw: str) -> Path:
 
 def _normalize_database_url(url: str) -> str:
     if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url[len("postgres://"):]
-    if url.startswith("postgresql://") and "+psycopg" not in url:
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
+        url = "postgresql+psycopg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://") and "+psycopg" not in url:
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+
+    if url.startswith("postgresql"):
+        import urllib.parse
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            username = parsed.username
+            password = parsed.password
+            hostname = parsed.hostname
+            port = parsed.port
+
+            netloc = ""
+            if username is not None:
+                netloc += urllib.parse.quote(username, safe="")
+                if password is not None:
+                    netloc += ":" + urllib.parse.quote(password, safe="")
+                netloc += "@"
+
+            if hostname is not None:
+                netloc += hostname
+                if port is not None:
+                    netloc += f":{port}"
+
+            parsed = parsed._replace(netloc=netloc)
+            return urllib.parse.urlunsplit(parsed)
+        except Exception:
+            return url
     return url
+
 
 
 class Settings(BaseSettings):

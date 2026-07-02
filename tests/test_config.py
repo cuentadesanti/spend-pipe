@@ -13,6 +13,17 @@ def test_postgres_url_is_normalized_for_sqlalchemy():
     assert settings.sqlalchemy_database_url == "postgresql+psycopg://postgres:secret@example.com:5432/postgres"
 
 
+def test_postgres_url_special_char_password():
+    settings = Settings(
+        database_url="postgresql://postgres:Arrolladora77!@example.com:5432/postgres",
+        actual_server_url="",
+        actual_password="",
+        actual_sync_id="",
+    )
+    assert settings.sqlalchemy_database_url == "postgresql+psycopg://postgres:Arrolladora77%21@example.com:5432/postgres"
+
+
+
 def test_storage_path_drives_default_dirs():
     settings = Settings(
         storage_path="/tmp/spend-pipe-data",
