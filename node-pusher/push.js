@@ -55,6 +55,30 @@ async function main() {
   const accounts = await api.getAccounts();
   const idByName = Object.fromEntries(accounts.map((a) => [a.name, a.id]));
 
+  // ── Resolver categorías ('Grupo / Categoría' → id), creando las que falten ──
+  const groups = await api.getCategoryGroups();
+  const catIdByFull = {};
+  const groupByName = {};
+  for (const g of groups) {
+    groupByName[g.name] = g;
+    for (const c of (g.categories || [])) catIdByFull[`${g.name} / ${c.name}`] = c.id;
+  }
+  async function resolveCategory(fullName) {
+    if (!fullName) return undefined;
+    if (catIdByFull[fullName]) return catIdByFull[fullName];
+    const [groupName, catName] = fullName.split(' / ');
+    const group = groupByName[groupName];
+    if (!group || !catName) {
+      console.log(`  ⚠️  categoría '${fullName}': grupo inexistente; va sin categoría.`);
+      return undefined;
+    }
+    if (!COMMIT) return undefined; // dry-run: no crear nada
+    const id = await api.createCategory({ name: catName, group_id: group.id, is_income: !!group.is_income });
+    catIdByFull[fullName] = id;
+    console.log(`  ✓ categoría creada: ${fullName}`);
+    return id;
+  }
+
   console.log('='.repeat(64));
   console.log(`BATCH ${artifact.batch_id}  —  modo: ${COMMIT ? 'COMMIT (escribe en Actual)' : 'DRY-RUN'}`);
   console.log('='.repeat(64));
@@ -67,25 +91,26 @@ async function main() {
       console.log(`\n⚠️  Cuenta '${grp.actual_account_name}' no existe en Actual; se omite el grupo.`);
       continue;
     }
-    const txns = grp.transactions.map((t) => {
+    const txns = [];
+    for (const t of grp.transactions) {
       if (t.transfer_to_actual_account) {
         transferLegs.push({
           accountId, date: t.date, imported_id: t.imported_id,
           destName: t.transfer_to_actual_account,
         });
       }
-      const tx = {
+      txns.push({
         date: t.date,
         amount: api.utils.amountToInteger(parseFloat(t.amount)),
         payee_name: t.payee_name || undefined,
         notes: t.notes || undefined,
         imported_id: t.imported_id,
         cleared: t.cleared !== false,
-      };
-      // category_name es null en MVP1 (Actual categoriza post-import con sus reglas).
-      // Cuando spend-pipe empiece a mandar categoría (MVP3), acá se resuelve name → id.
-      return tx;
-    });
+        // Categoría resuelta desde spend-pipe (reglas en-pipeline). Las transferencias
+        // no llevan categoría (la fase 2 las vincula).
+        category: t.transfer_to_actual_account ? undefined : await resolveCategory(t.category_name),
+      });
+    }
     console.log(`\n──── ${grp.actual_account_name}  (${txns.length} txns) ────`);
     for (const t of txns.slice(0, 5)) {
       console.log(`  ${t.date}  ${String(api.utils.integerToAmount(t.amount)).padStart(11)}  ${(t.payee_name || '').slice(0, 30)}`);

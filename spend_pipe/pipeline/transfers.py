@@ -63,6 +63,12 @@ def match_transfers(session: Session) -> int:
             neg.is_transfer = best.is_transfer = True
             neg.transfer_pair_id = best.id
             best.transfer_pair_id = neg.id
+            # Una transferencia no necesita categoría: si la fila estaba gateada SOLO
+            # por eso (sin regla que la categorice), se promueve a normalized.
+            for leg in (neg, best):
+                if (leg.status == TxnStatus.needs_review and leg.category is None
+                        and not leg.pending and (leg.payee or "").strip()):
+                    leg.status = TxnStatus.normalized
             matched += 1
     return matched
 

@@ -66,8 +66,10 @@ def test_export_builds_grouped_artifact(tmp_path):
     # Los dos Starbucks idénticos del mismo día NO colisionan: occ 0 y 1.
     occs = sorted(t.imported_id.rsplit(":", 1)[1] for t in star)
     assert occs == ["0", "1"]
-    # Categoría null en MVP1.
-    assert all(t.category_name is None for t in grp.transactions)
+    # Con el motor de reglas: OPENAI matchea → viaja categorizada; STARBUCKS no matchea → null.
+    openai = next(t for t in grp.transactions if "OPENAI" in t.metadata.raw_payee)
+    assert openai.category_name == "Gastos fijos / Suscripciones"
+    assert all(t.category_name is None for t in star)
     assert art.schema_version == "1.1"
 
     # El archivo escrito es JSON válido y recargable.

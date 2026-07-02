@@ -49,23 +49,29 @@ def classify_type(txn: Transaction) -> bool:
     return False
 
 
-# ── Pasada 3: categoría (stub) ─────────────────────────────────────────────
-def categorize(txn: Transaction) -> tuple[str | None, float | None]:
-    """Devuelve (category_name, confidence). Stub en MVP1: sin categoría.
-    En MVP3/4: reglas deterministas portadas de rules.js + LLM como sugeridor.
+# ── Pasada 3: categoría (reglas YAML deterministas) ─────────────────────────
+def categorize(txn: Transaction) -> tuple[str | None, float | None, str | None]:
+    """Devuelve (category_name, confidence, payee_override) desde las reglas YAML.
+    Sin match → (None, None, None) y la fila cae a needs_review (salvo transfers).
+    El fallback de IA (módulo futuro) solo sugiere sobre lo que sale sin match.
     """
-    return (None, None)
+    from .categorize import classify
+
+    v = classify(txn.raw_payee)
+    return (v.category, v.confidence, v.payee_override)
 
 
 def _needs_review(txn: Transaction) -> bool:
-    """Motivos para marcar needs_review en MVP1. Deliberadamente acotado: sin reglas
-    de categoría todavía, solo se resaltan filas genuinamente problemáticas.
-    """
+    """Motivos para marcar needs_review."""
     if txn.pending:  # autorizado/no liquidado: no debe aprobarse solo
         return True
     if not (txn.payee or "").strip():
         return True
     if txn.amount is None or Decimal(txn.amount) == 0:
+        return True
+    if txn.category is None:
+        # Sin regla que la categorice → la etiquetás a mano en el review.
+        # (Si después se detecta como transferencia, match_transfers la promueve.)
         return True
     return False
 
@@ -77,6 +83,9 @@ def run_pipeline(txn: Transaction) -> Transaction:
     """
     txn.payee = normalize_payee(txn.raw_payee)
     txn.is_transfer = classify_type(txn)
-    txn.category, txn.confidence = categorize(txn)
+    category, confidence, payee_override = categorize(txn)
+    txn.category, txn.confidence = category, confidence
+    if payee_override:
+        txn.payee = payee_override   # renombre de la regla (ej. 'PAGO DE NOMINA' → 'Nómina')
     txn.status = TxnStatus.needs_review if _needs_review(txn) else TxnStatus.normalized
     return txn

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./spend_pipe.db"
     inbox_dir: str = "./inbox"
     artifacts_dir: str = "./artifacts"   # donde se escriben los batch-<id>.json para el worker Node
+    rules_file: str = "./rules/categorize.yaml"   # reglas de categorización (YAML en git)
 
     # Actual @ PikaPods — los consume el worker Node vía este mismo entorno.
     actual_server_url: str = ""

@@ -69,8 +69,9 @@ def test_pending_forces_needs_review():
     from spend_pipe.models import Transaction, TxnStatus
     from spend_pipe.pipeline.normalize import run_pipeline
 
-    base = dict(date=date(2026, 7, 1), amount=Decimal("-11.83"), currency="EUR", raw_payee="COMIDA GUAU TAP")
+    # Payee que matchea una regla (UBER → Transporte), para aislar el efecto de pending.
+    base = dict(date=date(2026, 7, 1), amount=Decimal("-11.83"), currency="EUR", raw_payee="UBER RIDE")
     liquidado = run_pipeline(Transaction(**base, pending=False))
     autorizado = run_pipeline(Transaction(**base, pending=True))
-    assert liquidado.status == TxnStatus.normalized
-    assert autorizado.status == TxnStatus.needs_review
+    assert liquidado.status == TxnStatus.normalized      # regla + liquidado → fluye
+    assert autorizado.status == TxnStatus.needs_review   # pending gatea aunque haya regla

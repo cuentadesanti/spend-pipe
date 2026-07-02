@@ -1,0 +1,161 @@
+# Reglas de categorización de spend-pipe — fuente de verdad, versionada en git.
+# Portadas de finanzas-ai/rules.js (las 35 reglas que vivían en el servidor de Actual).
+#
+# Semántica (idéntica a Actual): se evalúan TODAS las reglas que matchean, en orden
+# pre → normal → post, y la última gana. El match es case-insensitive por 'contains'
+# sobre el payee CRUDO (raw_payee).
+#
+# Campos:
+#   any:      matchea si el raw_payee contiene CUALQUIER keyword.
+#   none:     ...y NO contiene ninguno de estos (ej. UBER sin EATS).
+#   payee:    renombra el payee para mostrar/pushear.
+#   category: 'Grupo / Categoría' (el worker la resuelve/crea en Actual).
+#   stage:    pre | normal (default) | post — único control de prioridad fiable.
+
+# ════════ BATCH 1 ════════
+# 1. Ingresos
+- label: Ingresos/Nómina
+  any: [PAGO DE NOMINA]
+  payee: Nómina
+  category: Ingresos / Nómina
+- label: Ingresos/Intereses
+  any: [CASH INTEREST]
+  payee: Intereses
+  category: Ingresos / Intereses
+- label: Ingresos/Dividendos
+  any: [DIVIDEND]
+  payee: Dividendos
+  category: Ingresos / Dividendos
+
+# 2. Transferencias y tarjetas
+- label: Transfer/NAFIN enviado
+  any: [SPEI ENVIADO NAFIN]
+  payee: CetesDirecto
+  category: Finanzas / Transferencias
+- label: Transfer/NAFIN devuelto
+  any: [SPEI DEVUELTO NAFIN]
+  payee: CetesDirecto
+  category: Finanzas / Transferencias
+- label: Transfer/Pago tarjeta
+  any: [PAGO TARJETA DE CREDITO]
+  payee: Pago tarjeta
+  category: Finanzas / Pago tarjeta
+- label: Transfer/Traspaso
+  any: [TRASPASO]
+  category: Finanzas / Transferencias
+
+# 3. Gastos fijos
+# APPLE.COM (no 'APPLE'): las compras vía Apple Pay llevan prefijo 'Apple pay:' y
+# NO son suscripciones; el prefijo se quita antes de matchear (ver categorize.py).
+- label: Fijos/Suscripciones
+  any: [SPOTIFY, NETFLIX, APPLE.COM, AMZN PRIME]
+  category: Gastos fijos / Suscripciones
+- label: Fijos/Servicios
+  any: [CFE, TELMEX, TELCEL, IZZI]
+  category: Gastos fijos / Servicios
+
+# 4. Gastos variables
+- label: Variables/Súper
+  any: [WALMART, CHEDRAUI, COSTCO, HEB, OXXO, MERCADONA]
+  category: Gastos variables / Súper
+- label: Variables/Compras
+  any: [AMAZON, MERCADO LIBRE, MERCADOPAGO]
+  category: Gastos variables / Compras
+- label: Variables/Transporte UBER
+  any: [UBER]
+  none: [EATS]
+  category: Gastos variables / Transporte
+- label: Variables/Transporte DIDI
+  any: [DIDI]
+  category: Gastos variables / Transporte
+- label: Variables/Restaurantes
+  any: [RAPPI, UBER EATS]
+  category: Gastos variables / Restaurantes
+
+# 5. Comisiones e impuestos
+- label: Finanzas/Comisiones
+  any: [COMISION, IVA COBRADO]
+  category: Finanzas / Comisiones
+
+# ════════ BATCH 2 ════════
+# 1. Bizum (social vs comercial)
+- label: Bizum/Ocio (a)
+  any: ['Bizum a ']
+  category: Gastos variables / Ocio
+- label: Bizum/Reembolsos (De)
+  any: ['Bizum De ']
+  category: Ingresos / Reembolsos
+
+# 2. Ingresos y renta
+- label: Ingresos/BCG
+  any: [BOSTON CONSULTING]
+  payee: BCG
+  category: Ingresos / Nómina
+- label: Renta/Tobias
+  any: [TOBIAS LANGE]
+  payee: Tobias Lange
+  category: Gastos fijos / Renta
+
+# 3. Transferencias y tarjetas
+# SANTIAGO SILVA en 'pre': regla amplia de persona, la sobreescriben comercios.
+- label: Transfer/Santiago Silva
+  any: [SANTIAGO SILVA]
+  category: Finanzas / Transferencias
+  stage: pre
+- label: Transfer/Amex
+  any: [AMERICAN EXPRESS]
+  payee: Amex
+  category: Finanzas / Pago tarjeta
+- label: Transfer/Banamex-Cetes
+  any: [BANAMEX, CETESDIRECTO]
+  category: Finanzas / Transferencias
+
+# 4. Suscripciones y salud
+- label: Salud/Gimnasios
+  any: [WELLHUB, GYMPASS]
+  category: Gastos variables / Salud
+- label: Suscripciones/Digital
+  any: [GOOGLE ONE, ANTHROPIC, OPENAI, CLAUDE.AI, VERCEL, MOVISTAR]
+  category: Gastos fijos / Suscripciones
+
+# 5. Comida y súper ('EATS' suelto captura 'Uber * Eats', 'Ubereats')
+- label: Variables/Restaurantes (fix)
+  any: [EATS, GLOVO, RAPPI]
+  category: Gastos variables / Restaurantes
+- label: Variables/Súper (ES)
+  any: [LIDL, 'DIA ', ALDI, ALIMENTACION]
+  category: Gastos variables / Súper
+
+# 6. Transporte y viajes
+- label: Variables/Transporte (ES)
+  any: [METRO DE MADRID, METRO BARCELONA, TAXI]
+  category: Gastos variables / Transporte
+- label: Variables/Viajes
+  any: [IBERIA, OUIGO, TRAINLINE, RYANAIR, OMIO]
+  category: Gastos variables / Viajes
+
+# ════════ BATCH 3 (limpieza Openbank) ════════
+- label: B3/Comisiones
+  any: [COMISIÓN BANCARIA]
+  category: Finanzas / Comisiones
+# 'EMPRESA MUNICI' = 'EMPRESA MUNICIPAL DE TRANSPORTES' truncado por Openbank.
+- label: B3/Transporte
+  any: [EMT, TMB BUS, EMPRESA MUNICI]
+  category: Gastos variables / Transporte
+- label: B3/Viajes
+  any: [RENFE, AEROP]
+  category: Gastos variables / Viajes
+- label: B3/Servicios
+  any: [ORANGE]
+  category: Gastos fijos / Servicios
+- label: B3/Compras
+  any: [IKEA, WALLAPOP, K-STORE, MAISONS, DECATHLON]
+  category: Gastos variables / Compras
+# Keywords en forma TRUNCADA: Openbank corta el comercio a ~14 chars
+# ('DISTRITO BURGE', 'SPUTNIK CLIMBI'); 'BURGE' matchea también 'BURGER…'.
+- label: B3/Restaurantes
+  any: [DINER, BURGE, TAKOS, PIZZA, DUMPLING, GYOZA, MONTADITOS, FONTANA]
+  category: Gastos variables / Restaurantes
+- label: B3/Ocio
+  any: [CINE, VILLANOS, CLIMBI]
+  category: Gastos variables / Ocio
