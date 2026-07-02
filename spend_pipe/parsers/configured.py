@@ -7,6 +7,7 @@ igual pero con format='pdf'.
 from __future__ import annotations
 
 from .bbva_pdf import BbvaPdfParser
+from .bbva_tdc_pdf import BbvaTdcPdfParser
 from .csv_generic import CsvColumnMap, GenericCsvParser
 from .openbank import OpenbankCardParser
 from .registry import register
@@ -26,6 +27,17 @@ register(
     BbvaPdfParser(
         source_bank="bbva-cuenta-digital",
         source_account="BBVA Cuenta Digital",
+        currency="MXN",
+    )
+)
+
+# BBVA TDC — estado de cuenta PDF de la tarjeta de crédito. Mismo source_account que
+# el CSV ('BBVA TDC'): una compra que llegue por ambas fuentes produce el MISMO
+# imported_id y se deduplica sola en ingest.
+register(
+    BbvaTdcPdfParser(
+        source_bank="bbva-tdc",
+        source_account="BBVA TDC",
         currency="MXN",
     )
 )

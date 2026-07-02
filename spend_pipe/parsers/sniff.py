@@ -72,13 +72,9 @@ def detect_pdf_text(text: str) -> Detection:
         )
     if "BBVA" in t and ("Puntos BBVA" in t or "tarjeta de crédito" in t.lower()):
         return Detection(
-            kind="pdf", source_bank="bbva-tdc", source_account="BBVA TDC",
-            label="BBVA Tarjeta de Crédito — estado de cuenta (PDF)", confidence="high",
-            guidance=(
-                "Todavía no hay parser para el PDF de la TDC. Mientras tanto: usá el "
-                "pegado manual (date,amount,payee) con los movimientos del estado, "
-                "como venías haciendo con el CSV a mano. El parser está en el roadmap."
-            ),
+            kind="pdf", source_bank="bbva-tdc", format="pdf", source_account="BBVA TDC",
+            parser_available=True, confidence="high",
+            label="BBVA Tarjeta de Crédito — estado de cuenta (PDF)",
         )
     # Ojo: 'Open Bank S.A.' viene en texto rotado (al revés) en el footer del PDF,
     # así que la segunda ancla es 'POSICION GLOBAL' (encabezado de la primera página).

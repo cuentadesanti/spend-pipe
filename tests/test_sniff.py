@@ -34,11 +34,11 @@ def test_pdf_bbva_cuenta_digital_detected_with_parser():
     assert d.format == "pdf"
 
 
-def test_pdf_bbva_tdc_detected_without_parser():
+def test_pdf_bbva_tdc_detected_with_parser():
     d = detect_pdf_text("BBVA ... Tu tarjeta de crédito te abre un mundo ... Puntos BBVA ...")
     assert d.source_bank == "bbva-tdc"
-    assert d.parser_available is False
-    assert d.guidance  # hay guía de qué hacer
+    assert d.format == "pdf"
+    assert d.parser_available is True   # parser de TDC PDF disponible desde 2026-07
 
 
 def test_pdf_openbank_extracto_warns_about_overlap():
