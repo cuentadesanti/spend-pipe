@@ -9,7 +9,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from .config import settings
-from .models import Batch, Transaction
+from .models import Batch, Transaction, TxnStatus
 from .schema import (
     BatchAccountGroup,
     BatchArtifact,
@@ -45,7 +45,20 @@ def actual_account_name(source_account: str) -> str:
 _actual_account_name = actual_account_name  # alias interno
 
 
-def _to_batch_txn(txn: Transaction) -> BatchTransaction:
+def _transfer_dest(txn: Transaction, session) -> str | None:
+    """Cuenta destino en Actual para la pata NEGATIVA de un par de transferencia.
+
+    Solo si el peer no está ya synced como transacción normal (en ese caso ambas
+    quedan regulares: crear la contraparte duplicaría lo ya empujado)."""
+    if session is None or not txn.is_transfer or not txn.transfer_pair_id or txn.amount >= 0:
+        return None
+    peer = session.get(Transaction, txn.transfer_pair_id)
+    if peer is None or peer.status == TxnStatus.synced:
+        return None
+    return _actual_account_name(peer.source_account)
+
+
+def _to_batch_txn(txn: Transaction, session=None) -> BatchTransaction:
     return BatchTransaction(
         spend_pipe_transaction_id=txn.id,
         date=txn.date,
@@ -59,6 +72,7 @@ def _to_batch_txn(txn: Transaction) -> BatchTransaction:
         imported_id=txn.imported_id,
         cleared=True,
         category_name=txn.category,  # null en MVP1
+        transfer_to_actual_account=_transfer_dest(txn, session),
         metadata=BatchTransactionMeta(
             source_file=txn.source_file,
             source_row=txn.source_row,
@@ -72,6 +86,7 @@ def build_batch_artifact(
     txns: list[Transaction],
     approved_by: str,
     currency_default: str = "MXN",
+    session=None,   # para resolver el destino de las patas de transferencia
 ) -> BatchArtifact:
     """Agrupa por cuenta (importTransactions opera por cuenta) preservando el orden."""
     groups: "OrderedDict[str, list[Transaction]]" = OrderedDict()
@@ -82,7 +97,7 @@ def build_batch_artifact(
         BatchAccountGroup(
             actual_account_name=_actual_account_name(source_account),
             source_account_name=source_account,
-            transactions=[_to_batch_txn(t) for t in rows],
+            transactions=[_to_batch_txn(t, session) for t in rows],
         )
         for source_account, rows in groups.items()
     ]

@@ -40,8 +40,8 @@ async function main() {
   loadDotEnv();
 
   const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf-8'));
-  if (artifact.schema_version !== '1.0') {
-    console.warn(`⚠️  schema_version '${artifact.schema_version}' (este worker espera '1.0')`);
+  if (!/^1\./.test(artifact.schema_version || '')) {
+    console.warn(`⚠️  schema_version '${artifact.schema_version}' (este worker espera 1.x)`);
   }
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spendpipe-actual-'));
@@ -60,6 +60,7 @@ async function main() {
   console.log('='.repeat(64));
 
   const plan = [];
+  const transferLegs = [];   // patas negativas a vincular como transferencia (fase 2)
   for (const grp of artifact.accounts) {
     const accountId = idByName[grp.actual_account_name];
     if (!accountId) {
@@ -67,6 +68,12 @@ async function main() {
       continue;
     }
     const txns = grp.transactions.map((t) => {
+      if (t.transfer_to_actual_account) {
+        transferLegs.push({
+          accountId, date: t.date, imported_id: t.imported_id,
+          destName: t.transfer_to_actual_account,
+        });
+      }
       const tx = {
         date: t.date,
         amount: api.utils.amountToInteger(parseFloat(t.amount)),
@@ -86,6 +93,10 @@ async function main() {
     if (txns.length > 5) console.log(`  … (+${txns.length - 5} más)`);
     plan.push({ accountId, name: grp.actual_account_name, txns });
   }
+  if (transferLegs.length) {
+    console.log(`\n⇄ ${transferLegs.length} transferencia(s) a vincular tras el import:`);
+    for (const l of transferLegs) console.log(`  ${l.date}  → ${l.destName}`);
+  }
 
   const total = plan.reduce((n, p) => n + p.txns.length, 0);
   console.log(`\nTOTAL: ${plan.length} cuenta(s), ${total} transacción(es).`);
@@ -99,6 +110,28 @@ async function main() {
   for (const { accountId, name, txns } of plan) {
     const res = await api.importTransactions(accountId, txns);
     console.log(`  ✓ ${name}: +${(res.added || []).length} nuevas, ${(res.updated || []).length} actualizadas`);
+  }
+
+  // ── Fase 2: vincular transferencias ──
+  // A cada pata negativa se le pone el transfer-payee de la cuenta destino;
+  // Actual auto-crea la contraparte (+) vinculada en esa cuenta. Idempotente:
+  // si la txn ya tiene transfer_id (re-run), se salta.
+  if (transferLegs.length) {
+    console.log('\nVinculando transferencias...');
+    const payees = await api.getPayees();
+    for (const leg of transferLegs) {
+      const destId = idByName[leg.destName];
+      if (!destId) { console.log(`  ⚠️  destino '${leg.destName}' no existe; se deja como transacción normal.`); continue; }
+      const tp = payees.find((p) => p.transfer_acct === destId);
+      if (!tp) { console.log(`  ⚠️  no hay transfer-payee para '${leg.destName}'; se deja normal.`); continue; }
+      const tx = (await api.getTransactions(leg.accountId, leg.date, leg.date))
+        .find((t) => t.imported_id === leg.imported_id);
+      if (!tx) { console.log(`  ⚠️  no se encontró ${leg.imported_id} tras el import.`); continue; }
+      if (tx.transfer_id) { console.log(`  · ${leg.date} → ${leg.destName}: ya vinculada (se omite).`); continue; }
+      await api.updateTransaction(tx.id, { payee: tp.id });
+      console.log(`  ⇄ ${leg.date} → ${leg.destName}: vinculada (contraparte auto-creada).`);
+    }
+    await api.sync();
   }
   console.log('\n✓ Push completo.');
 }

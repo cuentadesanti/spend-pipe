@@ -37,7 +37,8 @@
       {% for t in txns %}
       <tr>
         <td class="muted">{{ t.date }}</td>
-        <td>{{ t.raw_payee }}</td>
+        <td>{{ t.raw_payee }}{% if t.is_transfer and t.transfer_pair_id %}
+          <span class="pill s-approved" style="font-size:11px">⇄ transfer</span>{% endif %}</td>
         <td class="muted">{{ t.category or '—' }}</td>
         <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
         <td class="muted" style="font-size:12px">{{ t.imported_id }}</td>

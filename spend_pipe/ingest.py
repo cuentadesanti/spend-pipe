@@ -21,6 +21,7 @@ from .models import Import, ImportStatus, Transaction, TxnStatus
 from .parsers import get_parser
 from .parsers.manual import ManualParser
 from .pipeline.normalize import run_pipeline
+from .pipeline.transfers import match_transfers
 from .schema import CommonTransaction
 
 
@@ -89,6 +90,8 @@ def _persist(
         added += 1
 
     import_.status = ImportStatus.parsed
+    session.flush()
+    match_transfers(session)   # empareja patas de transferencia contra todo el staging
     session.commit()
     return IngestResult(
         import_id=import_.id,

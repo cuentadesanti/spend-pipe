@@ -15,7 +15,7 @@
       <thead>
         <tr>
           <th>Fecha</th><th>Payee crudo</th><th>Payee (normalizado, editable)</th>
-          <th>Categoría</th><th class="num">Monto</th><th>Estado</th><th>Dup</th>
+          <th>Categoría</th><th class="num">Monto</th><th>Estado</th><th>Dup</th><th>⇄</th>
         </tr>
       </thead>
       <tbody>
@@ -38,6 +38,11 @@
             {% if t.duplicate_of %}<span class="muted" style="font-size:11px"
               title="Sospecha: misma cuenta+fecha+monto que {{ t.duplicate_of }} (otro archivo/fuente)">≈ dup</span>{% endif %}
           </td>
+          <td>
+            <input type="checkbox" name="transfer_{{ t.id }}" {{ 'checked' if t.is_transfer else '' }}
+                   {{ 'disabled' if not t.is_transfer else '' }}
+                   title="{{ 'Transferencia detectada (par ' + (t.transfer_pair_id or '') + '); destildá si es falso positivo' if t.is_transfer else '' }}">
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -54,6 +59,9 @@
      <span class="pill s-approved">approved</span> y no marcado como duplicado.
      Las filas en <span class="pill s-needs_review">needs_review</span> (ej. Openbank
      <b>AUTORIZADO</b>/pendientes) quedan <b>fuera</b> hasta que las revises y les cambies el estado.
+     Los pares <b>⇄ transferencia</b> viajan como transferencia vinculada de Actual: se empuja la
+     pata negativa y la positiva queda <span class="pill s-synced">paired</span> (la representa la
+     contraparte que Actual crea).
      Al aprobar se escribe el artefacto <code>batch-&lt;id&gt;.json</code> listo para el push.</p>
   <form action="/imports/{{ imp.id }}/approve" method="post" onsubmit="return confirm('¿Aprobar y generar el batch?')">
     <button type="submit">Aprobar → generar batch</button>

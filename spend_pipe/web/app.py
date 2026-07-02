@@ -27,6 +27,7 @@ from ..models import Batch, BatchStatus, CsvMapping, Import, Transaction, TxnSta
 from ..parsers import available_parsers
 from ..parsers.csv_generic import CsvColumnMap, GenericCsvParser
 from ..parsers.sniff import detect_file, header_signature
+from ..pipeline.transfers import unpair
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ARTIFACTS_DIR = str(BASE_DIR / "artifacts")
@@ -223,6 +224,9 @@ async def save_import(import_id: str, request: Request, db: Session = Depends(ge
         if (st := form.get(f"status_{t.id}")) in {s.value for s in EDITABLE_STATUS}:
             t.status = TxnStatus(st)
         t.is_duplicate = form.get(f"dup_{t.id}") == "on"
+        # Destildar ⇄ deshace el par en ambas patas (falso positivo del matching).
+        if t.is_transfer and form.get(f"transfer_{t.id}") != "on":
+            unpair(db, t)
     db.commit()
     return RedirectResponse(f"/imports/{import_id}", status_code=303)
 
@@ -243,12 +247,22 @@ def approve_import(import_id: str, db: Session = Depends(get_db)):
     batch = Batch(status=BatchStatus.approved, approved_by="web", approved_at=datetime.now(timezone.utc))
     db.add(batch)
     db.flush()
+
+    to_push: list[Transaction] = []
     for t in txns:
+        # Pata POSITIVA de una transferencia (peer no synced): la representa la
+        # contraparte que Actual auto-crea al empujar la pata negativa → no se pushea.
+        if t.is_transfer and t.transfer_pair_id and t.amount > 0:
+            peer = db.get(Transaction, t.transfer_pair_id)
+            if peer is not None and peer.status != TxnStatus.synced:
+                t.status = TxnStatus.paired
+                continue
         t.batch_id = batch.id
         t.status = TxnStatus.approved
+        to_push.append(t)
     db.commit()
 
-    artifact = build_batch_artifact(batch, list(txns), approved_by="web")
+    artifact = build_batch_artifact(batch, to_push, approved_by="web", session=db)
     write_artifact(artifact, ARTIFACTS_DIR)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 

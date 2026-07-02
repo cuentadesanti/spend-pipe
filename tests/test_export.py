@@ -68,7 +68,7 @@ def test_export_builds_grouped_artifact(tmp_path):
     assert occs == ["0", "1"]
     # Categoría null en MVP1.
     assert all(t.category_name is None for t in grp.transactions)
-    assert art.schema_version == "1.0"
+    assert art.schema_version == "1.1"
 
     # El archivo escrito es JSON válido y recargable.
     path = write_artifact(art, str(tmp_path))

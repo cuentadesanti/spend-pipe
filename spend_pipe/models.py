@@ -50,6 +50,8 @@ class TxnStatus(str, enum.Enum):
     approved = "approved"          # aprobada por humano dentro de un batch
     synced = "synced"              # empujada a Actual (tiene actual_txn_id)
     rejected = "rejected"          # descartada por humano (terminal, no se pushea)
+    paired = "paired"              # pata + de una transferencia: la representa la
+                                   # contraparte que Actual auto-crea; nunca se pushea
 
 
 class ImportStatus(str, enum.Enum):

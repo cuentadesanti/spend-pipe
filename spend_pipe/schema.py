@@ -12,7 +12,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = "1.0"
+# 1.1: se agrega transfer_to_actual_account (transferencias entre cuentas propias).
+SCHEMA_VERSION = "1.1"
 
 
 class CommonTransaction(BaseModel):
@@ -50,6 +51,9 @@ class BatchTransaction(BaseModel):
     imported_id: str
     cleared: bool = True
     category_name: Optional[str] = None   # null en MVP1; se puebla en MVP3 sin cambiar el contrato
+    # Pata negativa de una transferencia detectada: el worker le pone el transfer-payee
+    # de esta cuenta y Actual auto-crea la contraparte vinculada.
+    transfer_to_actual_account: Optional[str] = None
     metadata: BatchTransactionMeta = Field(default_factory=BatchTransactionMeta)
 
 
