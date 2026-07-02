@@ -2,6 +2,11 @@
 {% block content %}
 
 <p><a href="/" class="muted">← inicio</a></p>
+{% if detected %}
+<div class="card" style="border-color:var(--ok)">
+  ✓ <b>Detectado:</b> {{ detected }} — revisá y aprobá abajo.
+</div>
+{% endif %}
 <h2>{{ imp.source_bank }} · <span class="muted">{{ imp.source_file }}</span></h2>
 
 <div class="card">

@@ -64,6 +64,23 @@ class BatchStatus(str, enum.Enum):
     pushed = "pushed"
 
 
+class CsvMapping(Base):
+    """Mapeo de columnas 'aprendido' para un layout CSV: la firma del header lo
+    reconoce en futuros uploads y el archivo entra solo, sin re-mapear."""
+
+    __tablename__ = "csv_mappings"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: _uuid("map"))
+    name: Mapped[str] = mapped_column(String)                      # ej. 'BBVA MX app — cuenta'
+    header_signature: Mapped[str] = mapped_column(String, index=True)
+    source_bank: Mapped[str] = mapped_column(String)
+    source_account: Mapped[str] = mapped_column(String)
+    currency: Mapped[str] = mapped_column(String, default="MXN")
+    delimiter: Mapped[str] = mapped_column(String, default=",")
+    colmap_json: Mapped[str] = mapped_column(Text)                 # CsvColumnMap serializado
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Import(Base):
     """Un archivo cargado. Entidad de primera clase: permite auditar y hacer rollback."""
 

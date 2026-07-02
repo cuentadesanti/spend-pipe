@@ -6,6 +6,7 @@ igual pero con format='pdf'.
 """
 from __future__ import annotations
 
+from .bbva_pdf import BbvaPdfParser
 from .csv_generic import CsvColumnMap, GenericCsvParser
 from .openbank import OpenbankCardParser
 from .registry import register
@@ -17,6 +18,15 @@ register(
         source_account="BBVA TDC",
         currency="MXN",
         colmap=CsvColumnMap(date="Date", amount="Amount", payee="Payee", memo="Memo"),
+    )
+)
+
+# BBVA Cuenta Digital (débito) — estado de cuenta PDF. source_account SIN CLABE/nº completo.
+register(
+    BbvaPdfParser(
+        source_bank="bbva-cuenta-digital",
+        source_account="BBVA Cuenta Digital",
+        currency="MXN",
     )
 )
 

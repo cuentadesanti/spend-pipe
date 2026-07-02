@@ -7,6 +7,8 @@ La CLI/TUI queda como herramienta auxiliar; esta UI es el camino principal.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,9 +22,11 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import SessionLocal, upgrade_to_head
 from ..export import build_batch_artifact, write_artifact
-from ..ingest import ingest_file, ingest_manual
-from ..models import Batch, BatchStatus, Import, Transaction, TxnStatus
+from ..ingest import ingest_file, ingest_manual, ingest_with_parser
+from ..models import Batch, BatchStatus, CsvMapping, Import, Transaction, TxnStatus
 from ..parsers import available_parsers
+from ..parsers.csv_generic import CsvColumnMap, GenericCsvParser
+from ..parsers.sniff import detect_file, header_signature
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ARTIFACTS_DIR = str(BASE_DIR / "artifacts")
@@ -76,18 +80,104 @@ def index(request: Request, db: Session = Depends(get_db)):
     )
 
 
-# ── Ingest ───────────────────────────────────────────────────────────────────
+# ── Ingest: upload único con auto-detección ─────────────────────────────────
+def _save_to_inbox(file: UploadFile) -> Path:
+    data = file.file.read()
+    dest = INBOX_DIR / (file.filename or "upload")
+    if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() != hashlib.sha256(data).hexdigest():
+        stem, suffix = dest.stem, dest.suffix
+        dest = INBOX_DIR / f"{stem}-{hashlib.sha256(data).hexdigest()[:6]}{suffix}"
+    dest.write_bytes(data)
+    return dest
+
+
+def _mapping_to_parser(m: CsvMapping) -> GenericCsvParser:
+    return GenericCsvParser(
+        source_bank=m.source_bank, source_account=m.source_account, currency=m.currency,
+        colmap=CsvColumnMap(**json.loads(m.colmap_json)), delimiter=m.delimiter,
+    )
+
+
 @app.post("/upload")
-def upload(
+def upload(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    dest = _save_to_inbox(file)
+    det = detect_file(str(dest))
+
+    # 1. Fuente conocida con parser → ingesta directa.
+    if det.parser_available:
+        result = ingest_file(db, str(dest), det.source_bank, det.format)
+        return RedirectResponse(
+            f"/imports/{result.import_id}?detected={det.label}", status_code=303
+        )
+
+    # 2. CSV cuyo layout ya "aprendimos" (mapeo guardado) → entra solo.
+    if det.kind == "csv" and det.csv_headers:
+        sig = header_signature(det.csv_headers)
+        saved = db.scalars(select(CsvMapping).where(CsvMapping.header_signature == sig)).first()
+        if saved is not None:
+            result = ingest_with_parser(db, str(dest), _mapping_to_parser(saved))
+            return RedirectResponse(
+                f"/imports/{result.import_id}?detected=Mapeo guardado: {saved.name}",
+                status_code=303,
+            )
+
+    # 3. Sin ingesta directa → pantalla de diagnóstico (con form de mapeo si es CSV).
+    return templates.TemplateResponse(
+        "detect.html",
+        {"request": request, "det": det, "file_path": str(dest), "filename": dest.name},
+    )
+
+
+@app.post("/upload/map")
+def upload_mapped(
+    file_path: str = Form(...),
     source_bank: str = Form(...),
-    format: str = Form(...),
-    file: UploadFile = File(...),
+    source_account: str = Form(...),
+    currency: str = Form("MXN"),
+    col_date: str = Form(...),
+    col_payee: str = Form(...),
+    col_amount: str = Form(""),
+    col_debit: str = Form(""),
+    col_credit: str = Form(""),
+    col_memo: str = Form(""),
+    invert_sign: str = Form(""),
+    delimiter: str = Form(","),
+    save_mapping: str = Form(""),
+    mapping_name: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    dest = INBOX_DIR / file.filename
-    dest.write_bytes(file.file.read())
-    result = ingest_file(db, str(dest), source_bank, format)
-    return RedirectResponse(f"/imports/{result.import_id}", status_code=303)
+    colmap = CsvColumnMap(
+        date=col_date, payee=col_payee,
+        amount=col_amount or None, debit=col_debit or None, credit=col_credit or None,
+        memo=col_memo or None, invert_sign=invert_sign == "on",
+    )
+    parser = GenericCsvParser(
+        source_bank=source_bank, source_account=source_account,
+        currency=currency, colmap=colmap, delimiter=delimiter,
+    )
+    result = ingest_with_parser(db, file_path, parser)
+
+    if save_mapping == "on":
+        with open(file_path, encoding="utf-8-sig") as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+        from ..parsers.sniff import find_header_line
+        hdr = lines[find_header_line(lines, delimiter)].split(delimiter)
+        db.add(CsvMapping(
+            name=mapping_name or f"{source_bank} · {source_account}",
+            header_signature=header_signature(hdr),
+            source_bank=source_bank, source_account=source_account, currency=currency,
+            delimiter=delimiter,
+            colmap_json=json.dumps({
+                "date": colmap.date, "payee": colmap.payee, "amount": colmap.amount,
+                "debit": colmap.debit, "credit": colmap.credit, "memo": colmap.memo,
+                "invert_sign": colmap.invert_sign,
+            }),
+        ))
+        db.commit()
+
+    return RedirectResponse(
+        f"/imports/{result.import_id}?detected=Mapeado a mano: {source_bank}", status_code=303
+    )
 
 
 @app.post("/manual")
@@ -104,7 +194,7 @@ def manual(
 
 # ── Review de un import ──────────────────────────────────────────────────────
 @app.get("/imports/{import_id}", response_class=HTMLResponse)
-def import_detail(import_id: str, request: Request, db: Session = Depends(get_db)):
+def import_detail(import_id: str, request: Request, db: Session = Depends(get_db), detected: str = ""):
     imp = db.get(Import, import_id)
     txns = db.scalars(
         select(Transaction).where(Transaction.import_id == import_id).order_by(Transaction.date)
@@ -116,6 +206,7 @@ def import_detail(import_id: str, request: Request, db: Session = Depends(get_db
             "imp": imp,
             "txns": txns,
             "statuses": [s.value for s in EDITABLE_STATUS],
+            "detected": detected,
         },
     )
 

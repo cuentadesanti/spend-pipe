@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="/" class="muted">← inicio</a></p>
+<h2>Detección — <span class="muted">{{ filename }}</span></h2>
+
+<div class="card">
+  <h3>{{ det.label }}
+    <span class="pill {{ 's-normalized' if det.confidence=='high' else ('s-needs_review' if det.confidence=='medium' else 's-rejected') }}">
+      confianza {{ det.confidence }}</span>
+  </h3>
+  {% if det.guidance %}<p class="muted">{{ det.guidance }}</p>{% endif %}
+</div>
+
+{% if det.kind == 'csv' and det.csv_headers %}
+<div class="card">
+  <h3>Mapeo de columnas</h3>
+  <p class="muted">Detecté el header en la línea {{ det.csv_header_row + 1 }}.
+     Elegí columna única de importe <b>o</b> retiro/depósito por separado.</p>
+  <form action="/upload/map" method="post">
+    <input type="hidden" name="file_path" value="{{ file_path }}">
+    <input type="hidden" name="delimiter" value="{{ det.csv_delimiter }}">
+
+    <div class="row">
+      <div style="flex:1; min-width:220px">
+        <label>Banco / fuente</label>
+        <input type="text" name="source_bank" value="{{ det.source_bank or '' }}" placeholder="mi-banco" required>
+        <label>Cuenta (nombre en staging)</label>
+        <input type="text" name="source_account" placeholder="Mi Cuenta" required>
+        <label>Moneda</label>
+        <select name="currency">
+          <option value="MXN">MXN</option><option value="EUR">EUR</option><option value="USD">USD</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:220px">
+        {% macro colselect(name, label, guess, optional=False) -%}
+        <label>{{ label }}</label>
+        <select name="{{ name }}">
+          {% if optional %}<option value="">(ninguna)</option>{% endif %}
+          {% for h in det.csv_headers %}
+          <option value="{{ h }}" {{ 'selected' if guess==h else '' }}>{{ h }}</option>
+          {% endfor %}
+          {% if not optional and not guess %}<option value="" selected>— elegir —</option>{% endif %}
+        </select>
+        {%- endmacro %}
+        {{ colselect('col_date', 'Columna fecha', det.csv_guess.get('date')) }}
+        {{ colselect('col_payee', 'Columna concepto/payee', det.csv_guess.get('payee')) }}
+        {{ colselect('col_amount', 'Columna importe (única, con signo)', det.csv_guess.get('amount'), optional=True) }}
+        {{ colselect('col_debit', 'Columna retiro/cargo (−)', det.csv_guess.get('debit'), optional=True) }}
+        {{ colselect('col_credit', 'Columna depósito/abono (+)', det.csv_guess.get('credit'), optional=True) }}
+        {{ colselect('col_memo', 'Columna memo/referencia', det.csv_guess.get('memo'), optional=True) }}
+      </div>
+    </div>
+
+    <label style="display:flex; gap:8px; align-items:center; margin-top:10px">
+      <input type="checkbox" name="invert_sign" {{ 'checked' if det.suggest_invert else '' }}>
+      Invertir signo (tarjetas que exportan los gastos en positivo)
+    </label>
+    <label style="display:flex; gap:8px; align-items:center">
+      <input type="checkbox" name="save_mapping" checked>
+      Guardar este mapeo — el próximo archivo con estas columnas entra solo
+    </label>
+    <label>Nombre del mapeo (opcional)</label>
+    <input type="text" name="mapping_name" placeholder="ej. BBVA MX app — cuenta">
+
+    <div style="margin-top:14px">
+      <button type="submit">Ingerir con este mapeo</button>
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <h3>Qué podés hacer</h3>
+  <p class="muted">Este archivo no tiene ingesta directa todavía. El
+     <a href="/" style="color:var(--accent)">pegado manual</a> (date,amount,payee) siempre funciona
+     como puente, o pedime el parser si este formato va a llegar todos los meses.</p>
+</div>
+{% endif %}
+
+{% endblock %}

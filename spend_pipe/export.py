@@ -32,6 +32,7 @@ from .schema import (
 # (ej. "Openbank Nómina (EUR)"). El nombre debe coincidir EXACTO.
 ACCOUNT_MAP: dict[str, str] = {
     "Openbank Tarjeta": "Openbank Nómina (EUR)",   # débito → carga directa a Nómina (off-budget)
+    "BBVA Cuenta Digital": "BBVA Cuenta Digital (MXN)",   # el nombre en Actual lleva sufijo (MXN)
 }
 
 

@@ -95,7 +95,13 @@ def _persist(
 
 
 def ingest_file(session: Session, file_path: str, source_bank: str, format: str) -> IngestResult:
-    """Ingiere un archivo (csv/xlsx/pdf) usando el parser registrado para (source_bank, format)."""
+    """Ingiere un archivo usando el parser registrado para (source_bank, format)."""
+    return ingest_with_parser(session, file_path, get_parser(source_bank, format))
+
+
+def ingest_with_parser(session: Session, file_path: str, parser) -> IngestResult:
+    """Ingiere un archivo con una instancia de parser concreta (registrada o construida
+    al vuelo, ej. desde el form de mapeo de columnas del Web UI)."""
     file_hash = file_sha256(file_path)
 
     prior = session.scalars(select(Import).where(Import.file_hash == file_hash)).first()
@@ -106,14 +112,13 @@ def ingest_file(session: Session, file_path: str, source_bank: str, format: str)
             needs_review=0, reused_existing=True,
         )
 
-    parser = get_parser(source_bank, format)
     commons = parser.parse(file_path)
 
     import_ = Import(
-        source_bank=source_bank,
+        source_bank=parser.source_bank,
         source_file=file_path.rsplit("/", 1)[-1],
         file_hash=file_hash,
-        format=format,
+        format=parser.format,
         raw_file_path=file_path,
     )
     session.add(import_)
