@@ -156,9 +156,39 @@ def _apply_review_form(
     return split_errors, split_drafts
 
 
+_ACCOUNTS_CACHE: list[dict] = []
+
+def get_actual_accounts() -> list[dict]:
+    global _ACCOUNTS_CACHE
+    if _ACCOUNTS_CACHE:
+        return _ACCOUNTS_CACHE
+    try:
+        proc = subprocess.run(
+            ["node", "get_accounts.js"],
+            cwd=str(NODE_PUSHER),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if proc.returncode == 0:
+            lines = proc.stdout.splitlines()
+            json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
+            if json_line:
+                _ACCOUNTS_CACHE = json.loads(json_line[0])
+                return _ACCOUNTS_CACHE
+    except Exception as e:
+        print(f"Error fetching actual accounts: {e}")
+        
+    return [
+        {"name": "BBVA Cuenta Digital (MXN)"},
+        {"name": "BBVA TDC"},
+        {"name": "Openbank Nómina (EUR)"}
+    ]
+
+
 # ── Home ───────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, db: Session = Depends(get_db)):
+def index(request: Request, month: str = None, db: Session = Depends(get_db)):
     imports = db.scalars(select(Import).order_by(Import.created_at.desc())).all()
     # Conteos por status para cada import.
     counts: dict[str, dict[str, int]] = {}
@@ -171,15 +201,123 @@ def index(request: Request, db: Session = Depends(get_db)):
         counts[imp.id] = {s.value: n for s, n in rows}
     batches = db.scalars(select(Batch).order_by(Batch.created_at.desc())).all()
     
-    # Determinar qué bancos ya se importaron este mes
+    # Determinar fecha seleccionada (mes objetivo)
     import datetime
     now_dt = datetime.datetime.now()
-    imported_this_month = {
-        (imp.source_bank, imp.format)
-        for imp in imports
-        if imp.created_at.year == now_dt.year and imp.created_at.month == now_dt.month
+    if month:
+        try:
+            chosen_date = datetime.datetime.strptime(month, "%Y-%m")
+        except ValueError:
+            chosen_date = now_dt
+    else:
+        chosen_date = now_dt
+
+    chosen_year = chosen_date.year
+    chosen_month = chosen_date.month
+
+    # Calcular meses contiguos para navegacion
+    # Primer dia del mes actual
+    first_day_curr = chosen_date.replace(day=1)
+    prev_month_dt = first_day_curr - datetime.timedelta(days=1)
+    next_month_dt = (first_day_curr + datetime.timedelta(days=32)).replace(day=1)
+    
+    prev_month_str = prev_month_dt.strftime("%Y-%m")
+    next_month_str = next_month_dt.strftime("%Y-%m")
+    
+    SPANISH_MONTHS = {
+        1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+        5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+        9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+    }
+    current_month_label = f"{SPANISH_MONTHS[chosen_month]} {chosen_year}"
+
+    # Consultar transacciones de ese año y mes
+    from sqlalchemy import extract
+    rows_month = db.execute(
+        select(Transaction.source_account, Transaction.status, func.count())
+        .where(
+            extract("year", Transaction.date) == chosen_year,
+            extract("month", Transaction.date) == chosen_month
+        )
+        .group_by(Transaction.source_account, Transaction.status)
+    ).all()
+
+    # Agrupar counts por cuenta
+    monthly_stats = {}
+    for src_acc, status, count in rows_month:
+        monthly_stats.setdefault(src_acc, {}).setdefault(status.value, 0)
+        monthly_stats[src_acc][status.value] += count
+
+    # Obtener cuentas reales de Actual (PikaPods)
+    actual_accounts = get_actual_accounts()
+    
+    ACCOUNT_MAPPING_INFO = {
+        "BBVA Cuenta Digital (MXN)": {
+            "id": "bbva-cuenta-digital",
+            "display_name": "BBVA Cuenta Digital",
+            "source_accounts": ["BBVA Cuenta Digital"],
+            "formats_label": "Formatos: PDF",
+        },
+        "BBVA TDC": {
+            "id": "bbva-tdc",
+            "display_name": "BBVA Tarjeta de Crédito",
+            "source_accounts": ["BBVA TDC", "BBVA México — movimientos"],
+            "formats_label": "Formatos: PDF / CSV / App",
+        },
+        "Openbank Nómina (EUR)": {
+            "id": "openbank-tdc",
+            "display_name": "Openbank Tarjeta",
+            "source_accounts": ["Openbank Tarjeta"],
+            "formats_label": "Formatos: XLS / HTML",
+        }
     }
     
+    grid_items = []
+    for acc in actual_accounts:
+        acc_name = acc["name"]
+        if acc_name in ACCOUNT_MAPPING_INFO:
+            info = ACCOUNT_MAPPING_INFO[acc_name]
+            
+            total_txns = 0
+            needs_review = 0
+            approved_or_synced = 0
+            for src in info["source_accounts"]:
+                stats = monthly_stats.get(src, {})
+                needs_review += stats.get("needs_review", 0)
+                approved_or_synced += stats.get("approved", 0) + stats.get("synced", 0) + stats.get("normalized", 0) + stats.get("paired", 0)
+                total_txns += sum(stats.values())
+                
+            if total_txns == 0:
+                status = "pending"
+                status_label = "Pendiente"
+            elif needs_review > 0:
+                status = "pending"
+                status_label = f"Pendiente ({needs_review} por revisar)"
+            else:
+                status = "ready"
+                status_label = f"Al día ({approved_or_synced} txns)"
+                
+            grid_items.append({
+                "id": info["id"],
+                "name": info["display_name"],
+                "actual_name": acc_name,
+                "formats_label": info["formats_label"],
+                "status": status,
+                "status_label": status_label,
+            })
+            
+    # Garantizar que siempre se muestren las 3 cuentas minimas por si falla el API de Actual
+    if not grid_items:
+        for acc_name, info in ACCOUNT_MAPPING_INFO.items():
+            grid_items.append({
+                "id": info["id"],
+                "name": info["display_name"],
+                "actual_name": acc_name,
+                "formats_label": info["formats_label"],
+                "status": "pending",
+                "status_label": "Pendiente",
+            })
+            
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -188,8 +326,10 @@ def index(request: Request, db: Session = Depends(get_db)):
             "imports": imports,
             "counts": counts,
             "batches": batches,
-            "parsers": available_parsers(),
-            "imported_this_month": imported_this_month,
+            "grid_items": grid_items,
+            "current_month_label": current_month_label,
+            "prev_month_str": prev_month_str,
+            "next_month_str": next_month_str,
         },
     )
 
