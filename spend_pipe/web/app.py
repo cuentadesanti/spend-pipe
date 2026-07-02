@@ -170,6 +170,16 @@ def index(request: Request, db: Session = Depends(get_db)):
         ).all()
         counts[imp.id] = {s.value: n for s, n in rows}
     batches = db.scalars(select(Batch).order_by(Batch.created_at.desc())).all()
+    
+    # Determinar qué bancos ya se importaron este mes
+    import datetime
+    now_dt = datetime.datetime.now()
+    imported_this_month = {
+        (imp.source_bank, imp.format)
+        for imp in imports
+        if imp.created_at.year == now_dt.year and imp.created_at.month == now_dt.month
+    }
+    
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -179,6 +189,7 @@ def index(request: Request, db: Session = Depends(get_db)):
             "counts": counts,
             "batches": batches,
             "parsers": available_parsers(),
+            "imported_this_month": imported_this_month,
         },
     )
 
@@ -351,7 +362,12 @@ async def approve_import(import_id: str, request: Request, db: Session = Depends
 
     artifact = build_batch_artifact(batch, to_push, approved_by="web", session=db)
     write_artifact(artifact, ARTIFACTS_DIR)
-    return RedirectResponse(f"/batches/{batch.id}", status_code=303)
+    
+    redirect_url = f"/batches/{batch.id}"
+    if request.query_params.get("auto_push") == "1":
+        redirect_url += "?auto_push=1"
+        
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 # ── Batch + push ─────────────────────────────────────────────────────────────

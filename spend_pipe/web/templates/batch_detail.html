@@ -1,67 +1,184 @@
 {% extends "base.html" %}
 {% block content %}
 
-<p><a href="/" class="muted">← inicio</a></p>
-<h2>Batch <code>{{ batch.id }}</code>
-  <span class="pill s-{{ 'synced' if batch.status.value=='pushed' else 'approved' }}">{{ batch.status.value }}</span>
-</h2>
-<p class="muted">Aprobado por {{ batch.approved_by }} · {{ batch.approved_at.strftime("%Y-%m-%d %H:%M") if batch.approved_at }}</p>
+<style>
+  .sync-card {
+    border-left: 4px solid var(--accent);
+  }
 
-<div class="card">
+  .worker-output {
+    background: #12151b;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    max-height: 400px;
+    color: #e6e8ec;
+  }
+
+  /* Full screen Syncing Loader Overlay */
+  #syncing-loader {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 17, 21, 0.96);
+    z-index: 99999;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .spinner {
+    width: 60px;
+    height: 60px;
+    border: 5px solid rgba(79, 140, 255, 0.15);
+    border-top: 5px solid var(--accent);
+    border-radius: 50%;
+    animation: spin 1s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+    margin-bottom: 24px;
+    box-shadow: 0 0 15px rgba(79, 140, 255, 0.2);
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  .loader-text {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 8px;
+  }
+
+  .loader-subtext {
+    color: var(--muted);
+    font-size: 14px;
+  }
+</style>
+
+<div id="syncing-loader">
+  <div class="spinner"></div>
+  <div class="loader-text">Sincronizando con Actual Budget...</div>
+  <div class="loader-subtext">Conectando a PikaPods y subiendo transacciones sin duplicados</div>
+</div>
+
+<p><a href="/" class="muted">← inicio</a></p>
+<div
+  style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+  <h2 style="margin:0">Batch <code>{{ batch.id[:12] }}...</code></h2>
+  <div>
+    <span class="pill s-{{ 'synced' if batch.status.value=='pushed' else 'approved' }}"
+      style="font-size:13px; padding:4px 12px; font-weight:600;">
+      {{ 'Sincronizado' if batch.status.value=='pushed' else 'Aprobado (Listo para Push)' }}
+    </span>
+  </div>
+</div>
+<p class="muted">Aprobado por {{ batch.approved_by }} · {{ batch.approved_at.strftime("%Y-%m-%d %H:%M") if
+  batch.approved_at }}</p>
+
+<div class="card sync-card">
   <h3>Push a Actual</h3>
-  <p class="muted">Artefacto: <code>{{ artifact_path }}</code></p>
+  <p class="muted">Artefacto generado: <code>batch-{{ batch.id }}.json</code></p>
+
   {% if batch.status.value != 'pushed' %}
-  <form action="/batches/{{ batch.id }}/push" method="post"
-        onsubmit="return confirm('Esto escribe en Actual (PikaPods). ¿Continuar?')">
-    <button type="submit">Push a Actual (--commit)</button>
-    <span class="muted" style="margin-left:10px">requiere <code>npm install</code> en node-pusher</span>
+  <form id="push-form" action="/batches/{{ batch.id }}/push" method="post" onsubmit="showLoader()">
+    <button type="submit" id="btn-push-commit" style="padding: 10px 20px; font-size:15px;">Sincronizar ahora
+      (--commit)</button>
+    <p class="muted" style="font-size:12px; margin-top:8px;">Esto establecerá conexión con tu servidor y aplicará la
+      desduplicación con <code>imported_id</code>.</p>
   </form>
   {% else %}
-  <p class="pill s-synced">ya empujado</p>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <span class="pill s-synced" style="padding: 4px 12px; font-weight:600;">Estado: Sincronizado</span>
+  </div>
   {% endif %}
 
   {% if output %}
-  <h4 style="margin-bottom:6px">Salida del worker</h4>
-  <pre>{{ output }}</pre>
+  <h4 style="margin-bottom:10px; margin-top:20px;">Resultado de la sincronización</h4>
+  <div class="worker-output">{{ output }}</div>
   {% endif %}
-
-  <p class="muted" style="font-size:12px; margin-top:12px">Equivalente en CLI:<br>
-    <code>cd node-pusher && node push.js {{ artifact_path }} --commit</code></p>
 </div>
 
 <div class="card">
-  <h3>Transacciones ({{ txns|length }})</h3>
-  <table>
-    <thead><tr><th>Fecha</th><th>Payee (a Actual: crudo)</th><th>Categoría</th><th class="num">Monto</th><th>imported_id</th></tr></thead>
-    <tbody>
-      {% for t in txns %}
-      <tr>
-        <td class="muted">{{ t.date }}</td>
-        <td>{{ t.raw_payee }}{% if t.is_transfer and t.transfer_pair_id %}
-          <span class="pill s-approved" style="font-size:11px">⇄ transfer</span>{% endif %}</td>
-        <td class="muted">
-          {% if t.splits %}
-          {{ t.splits|length }} split(s)
-          {% else %}
-          {{ t.category or '—' }}
-          {% endif %}
-        </td>
-        <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
-        <td class="muted" style="font-size:12px">{{ t.imported_id }}</td>
-      </tr>
-      {% if t.splits %}
-      <tr>
-        <td></td>
-        <td colspan="4" class="muted" style="font-size:12px">
-          {% for split in t.splits %}
-          <div>↳ {{ '%.2f'|format(split.amount) }} {{ t.currency }} · {{ split.category }}{% if split.notes %} · {{ split.notes }}{% endif %}</div>
-          {% endfor %}
-        </td>
-      </tr>
-      {% endif %}
-      {% endfor %}
-    </tbody>
-  </table>
+  <h3>Transacciones en este lote ({{ txns|length }})</h3>
+  <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Payee (enviado a Actual)</th>
+          <th>Categoría</th>
+          <th class="num">Monto</th>
+          <th>ID de importación</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in txns %}
+        <tr>
+          <td class="muted">{{ t.date }}</td>
+          <td>
+            <b>{{ t.payee or t.raw_payee }}</b>
+            {% if t.is_transfer and t.transfer_pair_id %}
+            <span class="pill s-approved" style="font-size:10px; margin-left:6px;">⇄ transfer</span>
+            {% endif %}
+          </td>
+          <td class="muted">
+            {% if t.splits %}
+            <span class="pill s-approved" style="font-size:11px;">{{ t.splits|length }} splits</span>
+            {% else %}
+            {{ t.category or '—' }}
+            {% endif %}
+          </td>
+          <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight:600;">
+            {{ '%.2f'|format(t.amount) }} {{ t.currency }}
+          </td>
+          <td class="muted" style="font-size:12px;"><code>{{ t.imported_id[:25] }}...</code></td>
+        </tr>
+        {% if t.splits %}
+        <tr>
+          <td></td>
+          <td colspan="4" class="muted" style="font-size:12px; padding-left:12px; background: rgba(255,255,255,0.01);">
+            {% for split in t.splits %}
+            <div style="padding: 2px 0;">↳ <b>{{ '%.2f'|format(split.amount) }} {{ t.currency }}</b> · {{ split.category
+              }}{% if split.notes %} · <i>{{ split.notes }}</i>{% endif %}</div>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
+
+<script>
+  function showLoader() {
+    document.getElementById('syncing-loader').style.display = 'flex';
+  }
+
+  // Auto-submit push if auto_push parameter is present
+  document.addEventListener("DOMContentLoaded", function () {
+    const urlParams = new URLSearchParams(window.location.search);
+    const isPushed = "{{ batch.status.value }}" === "pushed";
+
+    if (urlParams.get('auto_push') === '1' && !isPushed) {
+      showLoader();
+      // Enviar el formulario automáticamente
+      document.getElementById('push-form').submit();
+    }
+  });
+</script>
 
 {% endblock %}

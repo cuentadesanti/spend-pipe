@@ -2,87 +2,454 @@
 {% block content %}
 
 <style>
-  .split-panel-row { display:none; }
-  .split-panel-row.open { display:table-row; }
-  .split-panel { background:#12151b; border:1px dashed var(--line); border-radius:8px; padding:12px; }
-  .split-panel-head { display:flex; gap:12px; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
-  .split-rows { display:grid; gap:8px; }
-  .split-row { display:grid; grid-template-columns:150px minmax(220px, 1fr) minmax(180px, 1fr) auto; gap:8px; align-items:center; }
-  .split-meta { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  .split-error { color:var(--bad); font-size:12px; }
-  .split-ok { color:var(--ok); font-size:12px; }
-  .primary-category-wrap.is-hidden { display:none; }
-  .review-warning { color:var(--warn); font-size:12px; }
-  @media (max-width: 900px) {
-    .split-row { grid-template-columns:1fr; }
+  /* Header & Navigation */
+  .detail-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .back-btn {
+    text-decoration: none;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  /* Keyboard Hints Panel */
+  .keyboard-hints {
+    background: #141822;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .key-badge {
+    background: #2b3040;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-weight: bold;
+    border-bottom: 2px solid #1a1e29;
+  }
+
+  /* Exception Tray (Autoclassified Drawer) */
+  .collapsible-drawer {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+
+  .drawer-header {
+    background: rgba(79, 180, 119, 0.05);
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .drawer-header:hover {
+    background: rgba(79, 180, 119, 0.08);
+  }
+
+  .drawer-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ok);
+    font-weight: 600;
+  }
+
+  .drawer-toggle-text {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .drawer-content {
+    display: none;
+    border-top: 1px solid var(--line);
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .drawer-content.visible {
+    display: block;
+  }
+
+  /* Surgery Table (Needs Review) */
+  .surgery-section-header {
+    margin-bottom: 12px;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .surgery-table {
+    width: 100%;
+    margin-bottom: 100px;
+    /* Space for sticky bottom bar */
+  }
+
+  /* Large legible rows */
+  .txn-row {
+    transition: background 0.15s, border-left-color 0.15s;
+    border-left: 4px solid transparent;
+  }
+
+  .txn-row:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  /* Keyboard selected active row styling */
+  .txn-row.active-row {
+    border-left: 4px solid var(--accent);
+    background: rgba(79, 140, 255, 0.06) !important;
+  }
+
+  .txn-row.status-approved-row {
+    background: rgba(79, 180, 119, 0.06);
+  }
+
+  .txn-row.status-rejected-row {
+    background: rgba(224, 92, 92, 0.06);
+  }
+
+  .txn-row td {
+    padding: 12px 10px;
+  }
+
+  .clean-input {
+    background: #11131a;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--fg);
+    width: 100%;
+    font-size: 13.5px;
+  }
+
+  .clean-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 5px rgba(79, 140, 255, 0.2);
+  }
+
+  /* Split sections styling */
+  .split-panel-row {
+    display: none;
+  }
+
+  .split-panel-row.open {
+    display: table-row;
+  }
+
+  .split-panel {
+    background: #12151b;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 8px 0;
+  }
+
+  .split-panel-head {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .split-rows {
+    display: grid;
+    gap: 8px;
+  }
+
+  .split-row {
+    display: grid;
+    grid-template-columns: 140px minmax(200px, 1fr) minmax(160px, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .split-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .split-error {
+    color: var(--bad);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .split-ok {
+    color: var(--ok);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .primary-category-wrap.is-hidden {
+    display: none;
+  }
+
+  .review-warning {
+    color: var(--warn);
+    font-size: 12px;
+  }
+
+  /* Synchronization Bridge (Sticky footer dashboard controls) */
+  .sticky-footer-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: #151821;
+    border-top: 1px solid var(--line);
+    padding: 16px 24px;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+  }
+
+  .sticky-footer-content {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .btn-sync {
+    background: var(--ok);
+    color: #fff;
+    font-size: 15px;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 700;
+    transition: all 0.2s;
+  }
+
+  .btn-sync:hover:not(:disabled) {
+    background: #3fa166;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(79, 180, 119, 0.3);
+  }
+
+  .btn-sync:disabled {
+    background: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
+    border: 1px solid var(--line);
   }
 </style>
 
-<p><a href="/" class="muted">← inicio</a></p>
+<div class="detail-nav">
+  <a href="/" class="back-btn">← Ir al Dashboard</a>
+</div>
+
 {% if detected %}
-<div class="card" style="border-color:var(--ok)">
-  ✓ <b>Detectado:</b> {{ detected }} — revisa y aprueba abajo.
+<div class="card" style="border-color:var(--ok); background: rgba(79,180,119,0.02)">
+  ✓ <b>Detección:</b> {{ detected }} — revisa y aprueba abajo.
 </div>
 {% endif %}
-<h2>{{ imp.source_bank }} · <span class="muted">{{ imp.source_file }}</span></h2>
+
+<h2>{{ imp.source_bank }} <span class="muted" style="font-size:16px;">· {{ imp.source_file }}</span></h2>
+
+<!-- Keyboard Navigation Guide -->
+<div class="keyboard-hints">
+  <span><b>Mesa de Cirugía Activada (Atajos):</b></span>
+  <span><span class="key-badge">↑</span> / <span class="key-badge">↓</span> o <span class="key-badge">J</span> / <span
+      class="key-badge">K</span> Navegar filas</span>
+  <span><span class="key-badge">Esc</span> Salir de un input</span>
+  <span><span class="key-badge">A</span> u <span class="key-badge">Enter</span> Aprobar fila</span>
+  <span><span class="key-badge">D</span> Duplicado</span>
+  <span><span class="key-badge">T</span> Transferencia</span>
+  <span><span class="key-badge">S</span> Splits</span>
+</div>
 
 <form action="/imports/{{ imp.id }}/save" method="post" id="review-form">
-  <div class="card">
-    <table>
+  <!-- Count partitions to divide tables -->
+  {% set ns = namespace(needs_review_count=0, auto_approved_count=0) %}
+
+  {% for t in txns %}
+  {% set has_errors = split_errors.get(t.id) %}
+  {% set drafts = split_drafts.get(t.id, []) %}
+  {% set needs_rev = (t.status.value == 'needs_review' or has_errors or drafts|length > 0 or t.pending) %}
+  {% if needs_rev %}
+  {% set ns.needs_review_count = ns.needs_review_count + 1 %}
+  {% else %}
+  {% set ns.auto_approved_count = ns.auto_approved_count + 1 %}
+  {% endif %}
+  {% endfor %}
+
+  <!-- 1. The Exception Tray (Auto-classified Collapsible Drawer) -->
+  {% if ns.auto_approved_count > 0 %}
+  <div class="collapsible-drawer">
+    <div class="drawer-header" onclick="toggleDrawer('auto-approved-drawer')">
+      <div class="drawer-status">
+        <span class="status-dot"></span>
+        <span>{{ ns.auto_approved_count }} transacciones auto-clasificadas con éxito</span>
+      </div>
+      <span class="drawer-toggle-text" id="auto-drawer-toggle">Ver detalles ▼</span>
+    </div>
+    <div class="drawer-content" id="auto-approved-drawer">
+      <table style="font-size:13px;">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Original</th>
+            <th>Nombre Payee</th>
+            <th>Categoría</th>
+            <th class="num">Monto</th>
+            <th>Estado</th>
+            <th>⇄</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in txns %}
+          {% set has_errors = split_errors.get(t.id) %}
+          {% set drafts = split_drafts.get(t.id, []) %}
+          {% set needs_rev = (t.status.value == 'needs_review' or has_errors or drafts|length > 0 or t.pending) %}
+          {% if not needs_rev %}
+          <tr style="opacity: 0.85;">
+            <td class="muted">{{ t.date }}</td>
+            <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:24] }}</td>
+            <td><input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
+                style="padding: 4px 8px; font-size:12.5px;"></td>
+            <td><input type="text" name="category_{{ t.id }}" class="clean-input" value="{{ t.category or '' }}"
+                style="padding: 4px 8px; font-size:12.5px;"></td>
+            <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight:600;">{{ '%.2f'|format(t.amount) }}
+            </td>
+            <td>
+              <select name="status_{{ t.id }}" onchange="updateSyncStates()" style="padding: 2px 4px; font-size:12px;">
+                {% for s in statuses %}
+                <option value="{{ s }}" {{ 'selected' if t.status.value==s else '' }}>{{ s }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <input type="checkbox" name="transfer_{{ t.id }}" {{ 'checked' if t.is_transfer else '' }} {{ 'disabled'
+                if not t.is_transfer else '' }} onchange="updateSyncStates()">
+              <input type="hidden" name="dup_{{ t.id }}" value="off"> <!-- Avoid missing fields -->
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 2. Surgery Table (Needs Review - Exceptional Items) -->
+  <div class="surgery-section-header">
+    Bandeja de Excepciones (<span id="exceptions-header-count">{{ ns.needs_review_count }}</span> pendientes)
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden; border-radius:10px;">
+    <table class="surgery-table">
       <thead>
         <tr>
-          <th>Fecha</th><th>Payee crudo</th><th>Payee (normalizado, editable)</th>
-          <th>Categoria</th><th class="num">Monto</th><th>Estado</th><th>Dup</th><th>⇄</th><th>✂</th>
+          <th style="width: 100px; padding-left:14px;">Fecha</th>
+          <th>Original</th>
+          <th>Establecer Payee</th>
+          <th>Categoría</th>
+          <th class="num" style="width:110px;">Monto</th>
+          <th style="width: 120px;">Estado</th>
+          <th style="width: 50px;">Dup</th>
+          <th style="width: 50px;">⇄</th>
+          <th style="width: 90px; text-align:center;">Splits</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="needs-review-tbody">
         {% for t in txns %}
+        {% set has_errors = split_errors.get(t.id) %}
         {% set drafts = split_drafts.get(t.id, []) %}
-        <tr>
-          <td class="muted">{{ t.date }}</td>
-          <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:28] }}</td>
-          <td><input type="text" name="payee_{{ t.id }}" value="{{ t.payee or '' }}"></td>
+        {% set needs_rev = (t.status.value == 'needs_review' or has_errors or drafts|length > 0 or t.pending) %}
+        {% if needs_rev %}
+        <tr class="txn-row" id="txn-row-{{ t.id }}" data-txn-id="{{ t.id }}"
+          class="{{ 'status-approved-row' if t.status.value == 'approved' else ('status-rejected-row' if t.status.value == 'rejected' else '') }}">
+          <td class="muted" style="padding-left:14px; font-size:13px;">{{ t.date }}</td>
+          <td class="muted" title="{{ t.raw_payee }}" style="font-size:12.5px;">{{ t.raw_payee[:26] }}</td>
           <td>
-            <div id="primary_category_wrap_{{ t.id }}" class="primary-category-wrap {{ 'is-hidden' if drafts else '' }}">
-              <input type="text" id="category_{{ t.id }}" name="category_{{ t.id }}" value="{{ t.category or '' }}" placeholder="(sin categoria)">
+            <input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
+              placeholder="Nombre legible">
+          </td>
+          <td>
+            <div id="primary_category_wrap_{{ t.id }}"
+              class="primary-category-wrap {{ 'is-hidden' if drafts else '' }}">
+              <input type="text" id="category_{{ t.id }}" name="category_{{ t.id }}" class="clean-input"
+                value="{{ t.category or '' }}" placeholder="Grupo / Categoría">
             </div>
             {% if drafts %}
-            <span class="muted" style="font-size:12px">La categoria vive en los splits.</span>
+            <div class="muted" style="font-size:11px; font-weight:600; padding:4px 0;">La categoría vive en los splits.
+            </div>
             {% endif %}
           </td>
-          <td class="num {{ 'neg' if t.amount < 0 else '' }}">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
+          <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight: 700; font-size:14px;">
+            {{ '%.2f'|format(t.amount) }} <span style="font-size:10px; font-weight:normal;">{{ t.currency }}</span>
+          </td>
           <td>
-            <select name="status_{{ t.id }}">
+            <select name="status_{{ t.id }}" class="clean-input" onchange="updateSyncStates()"
+              style="padding:7px 10px;">
               {% for s in statuses %}
               <option value="{{ s }}" {{ 'selected' if t.status.value==s else '' }}>{{ s }}</option>
               {% endfor %}
             </select>
           </td>
           <td>
-            <input type="checkbox" name="dup_{{ t.id }}" {{ 'checked' if t.is_duplicate else '' }}>
-            {% if t.duplicate_of %}<span class="muted" style="font-size:11px"
-              title="Sospecha: misma cuenta+fecha+monto que {{ t.duplicate_of }} (otro archivo/fuente)">≈ dup</span>{% endif %}
+            <input type="checkbox" name="dup_{{ t.id }}" onchange="updateSyncStates()" {{ 'checked' if t.is_duplicate
+              else '' }} style="transform: scale(1.15);">
+            {% if t.duplicate_of %}
+            <div class="muted" style="font-size:9px; font-weight:600;"
+              title="Colisión exacta de fecha/monto/cuenta en otro import">≈ DUP</div>
+            {% endif %}
           </td>
           <td>
-            <input type="checkbox" name="transfer_{{ t.id }}" {{ 'checked' if t.is_transfer else '' }}
-                   {{ 'disabled' if not t.is_transfer else '' }}
-                   title="{{ 'Transferencia detectada (par ' + (t.transfer_pair_id or '') + '); destilda si es falso positivo' if t.is_transfer else '' }}">
+            <input type="checkbox" name="transfer_{{ t.id }}" onchange="updateSyncStates()" {{ 'checked' if
+              t.is_transfer else '' }} {{ 'disabled' if not t.is_transfer else '' }}
+              title="{{ 'Transferencia detectada' if t.is_transfer else 'No coincide como transferencia' }}"
+              style="transform: scale(1.15);">
           </td>
-          <td>
-            <button type="button" class="secondary split-toggle" data-txn-id="{{ t.id }}">
-              {{ 'Cerrar split' if drafts else 'Split' }}
+          <td style="text-align:center;">
+            <button type="button" class="secondary split-toggle" data-txn-id="{{ t.id }}"
+              style="padding: 6px 12px; font-size:12px;">
+              {{ 'Cerrar' if drafts else 'Split' }}
             </button>
           </td>
         </tr>
+
+        <!-- Splits panel row -->
         <tr id="split_panel_row_{{ t.id }}" class="split-panel-row {{ 'open' if drafts else '' }}">
-          <td colspan="9">
-            <div class="split-panel" data-txn-id="{{ t.id }}" data-parent-amount="{{ '%.2f'|format(t.amount) }}" data-is-transfer="{{ 'true' if t.is_transfer else 'false' }}">
+          <td colspan="9" style="padding: 0 14px 14px 14px; background: rgba(0,0,0,0.05);">
+            <div class="split-panel" data-txn-id="{{ t.id }}" data-parent-amount="{{ '%.2f'|format(t.amount) }}"
+              data-is-transfer="{{ 'true' if t.is_transfer else 'false' }}">
               <div class="split-panel-head">
                 <div>
-                  <b>Splits</b>
-                  <span class="muted">Suma exacta al centavo; conserva el signo del movimiento.</span>
+                  <span style="font-weight:700; color:var(--accent);">Subsecciones (Splits)</span>
+                  <span class="muted" style="font-size:11px; margin-left:8px;">Deben sumar el total de la
+                    transacción.</span>
                 </div>
-                <button type="button" class="secondary split-add" data-txn-id="{{ t.id }}" {{ 'disabled' if t.is_transfer else '' }}>+ Agregar split</button>
+                <button type="button" class="secondary split-add" data-txn-id="{{ t.id }}"
+                  style="font-size:11.5px; padding: 4px 10px;" {{ 'disabled' if t.is_transfer else '' }}>+ Agregar
+                  línea</button>
               </div>
               {% if t.is_transfer %}
               <p class="review-warning" style="margin-top:0">Las transferencias no admiten splits.</p>
@@ -90,39 +457,57 @@
               <div id="split_rows_{{ t.id }}" class="split-rows">
                 {% for split in drafts %}
                 <div class="split-row">
-                  <input type="text" name="split_amount[{{ t.id }}][]" value="{{ split.amount }}" placeholder="-500.00">
-                  <input type="text" name="split_category[{{ t.id }}][]" value="{{ split.category }}" placeholder="Grupo / Categoria">
-                  <input type="text" name="split_notes[{{ t.id }}][]" value="{{ split.notes }}" placeholder="Notas del split (opcional)">
-                  <button type="button" class="secondary split-remove">Quitar</button>
+                  <input type="text" name="split_amount[{{ t.id }}][]" class="clean-input" value="{{ split.amount }}"
+                    placeholder="-500.00">
+                  <input type="text" name="split_category[{{ t.id }}][]" class="clean-input"
+                    value="{{ split.category }}" placeholder="Grupo / Categoria">
+                  <input type="text" name="split_notes[{{ t.id }}][]" class="clean-input"
+                    value="{{ split.notes or '' }}" placeholder="Comentarios split (opcional)">
+                  <button type="button" class="secondary split-remove"
+                    style="color:var(--bad); font-size:11px; padding:4px 8px;">Quitar</button>
                 </div>
                 {% endfor %}
               </div>
-              <div class="split-meta" style="margin-top:10px">
-                <span class="muted">Remanente: <b id="split_remainder_{{ t.id }}">0.00</b></span>
-                <span id="split_status_{{ t.id }}" class="{{ 'split-error' if split_errors.get(t.id) else 'split-ok' }}">
+              <div class="split-meta" style="margin-top:12px; border-top: 1px dotted var(--line); padding-top:8px;">
+                <span class="muted" style="font-size:12px;">Remanente por distribuir: <b id="split_remainder_{{ t.id }}"
+                    style="color:#fff;">0.00</b></span>
+                <span id="split_status_{{ t.id }}"
+                  class="{{ 'split-error' if split_errors.get(t.id) else 'split-ok' }}">
                   {{ split_errors.get(t.id) or 'OK' }}
                 </span>
               </div>
             </div>
           </td>
         </tr>
+        {% endif %}
         {% endfor %}
+
+        {% if ns.needs_review_count == 0 %}
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 40px; color: var(--muted); font-size: 15px;">
+            🎉 ¡Bandeja de excepciones limpia! No quedan transacciones que requieran revisión manual.
+          </td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
 
-  <div class="card">
-    <h3>Aprobar batch</h3>
-    <p class="muted">Se incluye solo lo que esté <span class="pill s-normalized">normalized</span> o
-       <span class="pill s-approved">approved</span> y no marcado como duplicado.
-       Las filas en <span class="pill s-needs_review">needs_review</span> quedan fuera hasta que las revises.
-       Las transferencias viajan como linked transfer en Actual; los splits viajan como subtransactions
-       del padre y la categoria principal se ignora mientras existan rebanadas.</p>
-    <div class="row" style="align-items:center">
-      <button type="submit" class="secondary" id="review-save">Guardar cambios</button>
-      <button type="submit" formaction="/imports/{{ imp.id }}/approve" id="review-approve"
-              onclick="return confirm('¿Aprobar y generar el batch?')">Aprobar → generar batch</button>
-      <span id="review-form-warning" class="review-warning"></span>
+  <!-- 3. Synchronization Bridge (Sticky Bottom Control Bar) -->
+  <div class="sticky-footer-bar">
+    <div class="sticky-footer-content">
+      <div>
+        <button type="submit" class="secondary" id="review-save" style="font-size:14px; padding: 10px 18px;">
+          Guardar borrador
+        </button>
+      </div>
+      <div>
+        <span id="review-form-warning" class="review-warning" style="margin-right:16px; font-weight:600;"></span>
+        <button type="submit" class="btn-sync" id="review-approve"
+          formaction="/imports/{{ imp.id }}/approve?auto_push=1">
+          Sincronizar a PikaPods
+        </button>
+      </div>
     </div>
   </div>
 </form>
@@ -148,10 +533,10 @@
     const row = document.createElement('div');
     row.className = 'split-row';
     row.innerHTML = `
-      <input type="text" name="split_amount[${txnId}][]" value="${amount}" placeholder="-500.00">
-      <input type="text" name="split_category[${txnId}][]" value="${category}" placeholder="Grupo / Categoria">
-      <input type="text" name="split_notes[${txnId}][]" value="${notes}" placeholder="Notas del split (opcional)">
-      <button type="button" class="secondary split-remove">Quitar</button>
+      <input type="text" name="split_amount[${txnId}][]" class="clean-input" value="${amount}" placeholder="-500.00">
+      <input type="text" name="split_category[${txnId}][]" class="clean-input" value="${category}" placeholder="Grupo / Categoria">
+      <input type="text" name="split_notes[${txnId}][]" class="clean-input" value="${notes}" placeholder="Comentarios split (opcional)">
+      <button type="button" class="secondary split-remove" style="color:var(--bad); font-size:11px; padding:4px 8px;">Quitar</button>
     `;
     return row;
   }
@@ -161,8 +546,8 @@
     const wrap = document.getElementById(`primary_category_wrap_${txnId}`);
     const input = document.getElementById(`category_${txnId}`);
     const hasSplits = panel.querySelectorAll('.split-row').length > 0;
-    wrap.classList.toggle('is-hidden', hasSplits);
-    input.disabled = hasSplits;
+    if (wrap) wrap.classList.toggle('is-hidden', hasSplits);
+    if (input) input.disabled = hasSplits;
   }
 
   function recalcPanel(panel) {
@@ -171,6 +556,8 @@
     const parentCents = toCents(panel.dataset.parentAmount);
     const remainderEl = document.getElementById(`split_remainder_${txnId}`);
     const statusEl = document.getElementById(`split_status_${txnId}`);
+    if (!remainderEl || !statusEl) return true;
+
     let totalCents = 0;
     let invalid = false;
     let message = 'OK';
@@ -194,7 +581,7 @@
       syncPrimaryCategory(panel);
       return true;
     } else if (invalid) {
-      message = 'Completa montos y categorias validas.';
+      message = 'Completa montos y categorias válidas.';
       statusEl.className = 'split-error';
     } else if (remainder !== 0) {
       message = 'La suma no cuadra con el total.';
@@ -213,11 +600,78 @@
     const panels = [...document.querySelectorAll('.split-panel')];
     const invalidPanels = panels.filter((panel) => !recalcPanel(panel));
     const disable = invalidPanels.length > 0;
+
     document.getElementById('review-save').disabled = disable;
-    document.getElementById('review-approve').disabled = disable;
+    document.getElementById('review-approve').disabled = disable || (getPendingExceptionsCount() > 0);
     document.getElementById('review-form-warning').textContent = disable
-      ? 'Corrige los splits antes de guardar o aprobar.'
+      ? 'Corrige los splits antes de guardar o sincronizar.'
       : '';
+  }
+
+  function getPendingExceptionsCount() {
+    // Cuenta cuántos select de estatus están configurados como 'needs_review'
+    // que estén en la bandeja de excepciones (tbody) y cuyo checkbox de duplicado no esté marcado
+    let count = 0;
+    const rows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')];
+    rows.forEach(row => {
+      const statusSelect = row.querySelector('select[name^="status_"]');
+      const dupCheck = row.querySelector('input[name^="dup_"]');
+
+      if (statusSelect && statusSelect.value === 'needs_review') {
+        if (!dupCheck || !dupCheck.checked) {
+          count++;
+        }
+      }
+    });
+    return count;
+  }
+
+  function updateSyncStates() {
+    const pendingCount = getPendingExceptionsCount();
+
+    // Contar cuántos son aprobados/normalizados listos para sincronizar
+    let toSyncCount = 0;
+    const allSelects = [...document.querySelectorAll('select[name^="status_"]')];
+
+    allSelects.forEach(select => {
+      const val = select.value;
+      const row = select.closest('tr');
+      const dupCheck = row ? row.querySelector('input[name^="dup_"]') : null;
+
+      if ((val === 'approved' || val === 'normalized') && (!dupCheck || !dupCheck.checked)) {
+        toSyncCount++;
+      }
+
+      // Aplicar color de hilera dinámico
+      if (row && row.classList.contains('txn-row')) {
+        row.classList.remove('status-approved-row', 'status-rejected-row');
+        if (val === 'approved') {
+          row.classList.add('status-approved-row');
+        } else if (val === 'rejected') {
+          row.classList.add('status-rejected-row');
+        }
+      }
+    });
+
+    // Actualizar el botón maestro de sincronización
+    const btnSync = document.getElementById('review-approve');
+    const headerCount = document.getElementById('exceptions-header-count');
+
+    if (headerCount) {
+      headerCount.textContent = pendingCount;
+    }
+
+    if (btnSync) {
+      if (pendingCount > 0) {
+        btnSync.disabled = true;
+        btnSync.textContent = `Sincronizar (${pendingCount} pendientes)`;
+      } else {
+        btnSync.disabled = false;
+        btnSync.textContent = `Sincronizar ${toSyncCount} transacciones a PikaPods`;
+      }
+    }
+
+    recalcAllPanels();
   }
 
   function ensureInitialRows(panel) {
@@ -230,6 +684,19 @@
     }
   }
 
+  // Collapsible logic for auto-approved
+  function toggleDrawer(id) {
+    const drawer = document.getElementById(id);
+    const label = document.getElementById('auto-drawer-toggle');
+    drawer.classList.toggle('visible');
+    if (drawer.classList.contains('visible')) {
+      label.textContent = 'Cerrar detalles ▲';
+    } else {
+      label.textContent = 'Ver detalles ▼';
+    }
+  }
+
+  // Event delegation setup
   document.addEventListener('click', (event) => {
     const toggle = event.target.closest('.split-toggle');
     if (toggle) {
@@ -266,7 +733,116 @@
     if (event.target.name && event.target.name.includes('split_')) recalcAllPanels();
   });
 
-  recalcAllPanels();
+  // ----------------------------------------------------
+  // Keyboard Shortcuts & Focus Navigation Engine
+  // ----------------------------------------------------
+  let activeIndex = -1;
+  let txnRows = [];
+
+  function updateTxnRowsList() {
+    txnRows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')];
+  }
+
+  function setActiveRow(index) {
+    if (index < 0 || index >= txnRows.length) return;
+
+    if (activeIndex >= 0 && activeIndex < txnRows.length) {
+      txnRows[activeIndex].classList.remove('active-row');
+    }
+
+    activeIndex = index;
+    const row = txnRows[activeIndex];
+    row.classList.add('active-row');
+
+    // Auto scroll row
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const activeEl = document.activeElement;
+    const isInput = activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT' || activeEl.tagName === 'TEXTAREA';
+
+    if (isInput) {
+      if (e.key === 'Escape') {
+        activeEl.blur();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // Navegar
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      if (activeIndex < txnRows.length - 1) {
+        setActiveRow(activeIndex + 1);
+      } else if (activeIndex === -1 && txnRows.length > 0) {
+        setActiveRow(0);
+      }
+    } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      if (activeIndex > 0) {
+        setActiveRow(activeIndex - 1);
+      }
+    }
+    // Aprobar
+    else if (e.key === 'a' || e.key === 'Enter') {
+      if (activeIndex >= 0 && activeIndex < txnRows.length) {
+        e.preventDefault();
+        const row = txnRows[activeIndex];
+        const select = row.querySelector('select[name^="status_"]');
+        if (select) {
+          select.value = 'approved';
+          updateSyncStates();
+          // Navegar abajo automatically
+          if (activeIndex < txnRows.length - 1) {
+            setActiveRow(activeIndex + 1);
+          }
+        }
+      }
+    }
+    // Splits toggle
+    else if (e.key === 's') {
+      if (activeIndex >= 0 && activeIndex < txnRows.length) {
+        e.preventDefault();
+        const row = txnRows[activeIndex];
+        const splitBtn = row.querySelector('.split-toggle');
+        if (splitBtn) splitBtn.click();
+      }
+    }
+    // Toggle duplicate
+    else if (e.key === 'd') {
+      if (activeIndex >= 0 && activeIndex < txnRows.length) {
+        e.preventDefault();
+        const row = txnRows[activeIndex];
+        const dupCheck = row.querySelector('input[name^="dup_"]');
+        if (dupCheck) {
+          dupCheck.checked = !dupCheck.checked;
+          updateSyncStates();
+        }
+      }
+    }
+    // Toggle transfer
+    else if (e.key === 't') {
+      if (activeIndex >= 0 && activeIndex < txnRows.length) {
+        e.preventDefault();
+        const row = txnRows[activeIndex];
+        const transCheck = row.querySelector('input[name^="transfer_"]');
+        if (transCheck && !transCheck.disabled) {
+          transCheck.checked = !transCheck.checked;
+          updateSyncStates();
+        }
+      }
+    }
+  });
+
+  // Initialization
+  document.addEventListener("DOMContentLoaded", () => {
+    updateTxnRowsList();
+    updateSyncStates();
+    if (txnRows.length > 0) {
+      setActiveRow(0);
+    }
+  });
 </script>
 
 {% endblock %}

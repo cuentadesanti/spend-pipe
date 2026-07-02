@@ -1,80 +1,409 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="row">
-  <div class="card">
-    <h3>Subir archivo</h3>
-    <p class="muted">Cualquier formato: PDF, CSV, .xls… El sistema detecta de qué banco es.
-       Si lo conoce, lo ingiere directo; si no, te propone un mapeo de columnas.</p>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      <label>Archivo</label>
-      <input type="file" name="file" required>
-      <p class="muted" style="font-size:12px">Con ingesta directa:
-        {% for b, f in parsers %}<code>{{ b }}/{{ f }}</code> {% endfor %}
-        + mapeos CSV guardados</p>
-      <button type="submit">Subir y detectar</button>
-    </form>
-  </div>
+<style>
+  /* Premium Dashboard Styles */
+  .dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  .dashboard-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+  }
+  .dashboard-period {
+    background: #1e2230;
+    border: 1px solid var(--line);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 13px;
+  }
 
-  <div class="card">
-    <h3>Pegar manual (puente BBVA-PDF)</h3>
-    <form action="/manual" method="post">
-      <label>Banco / fuente</label>
-      <input type="text" name="source_bank" placeholder="bbva" required>
-      <label>Cuenta (nombre en Actual)</label>
-      <input type="text" name="source_account" placeholder="BBVA Cuenta Digital" required>
-      <label>Moneda</label>
-      <input type="text" name="currency" value="MXN">
-      <label>Filas (header + <code>date,amount,payee[,memo]</code>)</label>
-      <textarea name="pasted" placeholder="date,amount,payee&#10;2026-06-15,-1234.56,Uber"></textarea>
-      <button type="submit">Ingerir</button>
+  /* Ingestion Grid & Cards */
+  .tracker-section {
+    margin-bottom: 32px;
+  }
+  .section-label {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .banks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 16px;
+  }
+  .bank-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 140px;
+  }
+  .bank-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(79, 140, 255, 0.15);
+  }
+  .bank-card.ready {
+    border-left: 4px solid var(--ok);
+  }
+  .bank-card.pending {
+    border-left: 4px solid var(--warn);
+  }
+  
+  .bank-meta {
+    margin-bottom: 12px;
+  }
+  .bank-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 4px 0;
+  }
+  .bank-format {
+    font-size: 10px;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .bank-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .status-badge.ready { color: var(--ok); }
+  .status-badge.ready .status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .status-badge.pending { color: var(--warn); }
+  .status-badge.pending .status-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+
+  .card-action-icon {
+    color: var(--muted);
+    font-size: 18px;
+    transition: color 0.2s;
+  }
+  .bank-card:hover .card-action-icon {
+    color: var(--accent);
+  }
+
+  /* Compact Drag & Drop Area Overlay */
+  #dropzone-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 17, 21, 0.95);
+    border: 4px dashed var(--accent);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  #dropzone-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .overlay-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .overlay-desc {
+    color: var(--muted);
+    font-size: 16px;
+  }
+
+  /* Two column secondary section */
+  .dashboard-columns {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+    margin-top: 32px;
+  }
+  @media (max-width: 900px) {
+    .dashboard-columns {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Manual paste drawer / collapsible card */
+  .collapsible-trigger {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+  .collapsible-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s cubic-bezier(0, 1, 0, 1);
+  }
+  .collapsible-content.expanded {
+    max-height: 1000px;
+    margin-top: 16px;
+    transition: max-height 0.5s ease-in-out;
+  }
+
+  .chevron {
+    transition: transform 0.2s;
+  }
+  .chevron.rotated {
+    transform: rotate(180deg);
+  }
+</style>
+
+<div class="dashboard-header">
+  <div>
+    <h1 class="dashboard-title">Dashboard</h1>
+    <span class="muted">Subida y control mensual de estados de cuenta</span>
+  </div>
+  <div class="dashboard-period" id="current-month-period">
+    Julio 2026
+  </div>
+</div>
+
+<!-- Drag & Drop overlay indicator -->
+<div id="dropzone-overlay">
+  <div class="overlay-title">Suelta tu archivo aquí</div>
+  <div class="overlay-desc">Se detectará el formato banco y se importará automáticamente</div>
+</div>
+
+<!-- Hidden File Uploader Form for global drops / clicks -->
+<form id="global-drag-form" action="/upload" method="post" enctype="multipart/form-data" style="display: none;">
+  <input type="file" id="global-drag-input" name="file">
+</form>
+
+<!-- 1. The Ingestion Tracker (Banks Grid) -->
+<div class="tracker-section">
+  <div class="section-label">Tracker de Ingesta (Arrastra archivos aquí)</div>
+  <div class="banks-grid">
+    {% for b, f in parsers %}
+      {% set is_ready = (b, f) in imported_this_month %}
+      {% set name_map = {
+        'bbva-cuenta-digital': 'BBVA Cuenta Digital',
+        'bbva-tdc': 'BBVA Tarjeta de Crédito',
+        'openbank-tdc': 'Openbank Tarjeta'
+      } %}
+      {% set display_name = name_map.get(b, b | replace('-', ' ') | title) %}
+      
+      <div class="bank-card {{ 'ready' if is_ready else 'pending' }}" onclick="triggerUpload()">
+        <div class="bank-meta">
+          <h3 class="bank-title">{{ display_name }}</h3>
+          <span class="bank-format">{{ f }} format</span>
+        </div>
+        <div class="bank-status-row">
+          {% if is_ready %}
+            <span class="status-badge ready">
+              <span class="status-dot"></span> Listo
+            </span>
+          {% else %}
+            <span class="status-badge pending">
+              <span class="status-dot"></span> Pendiente
+            </span>
+          {% endif %}
+          <div class="card-action-icon">↑</div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- 2. Manual Paste (Collapsible) -->
+<div class="card">
+  <div class="collapsible-trigger" onclick="toggleCollapsible('manual-collapsible', 'manual-chevron')">
+    <h3 style="margin:0">Pegar manual (Ingesta directa puente)</h3>
+    <span class="chevron" id="manual-chevron">▼</span>
+  </div>
+  <div class="collapsible-content" id="manual-collapsible">
+    <form action="/manual" method="post" style="border-top: 1px solid var(--line); padding-top: 16px;">
+      <div class="row">
+        <div class="card" style="margin-bottom:0">
+          <label>Banco / fuente</label>
+          <input type="text" name="source_bank" placeholder="bbva" required>
+          <label>Cuenta (nombre en Actual)</label>
+          <input type="text" name="source_account" placeholder="BBVA Cuenta Digital" required>
+          <label>Moneda</label>
+          <input type="text" name="currency" value="MXN">
+        </div>
+        <div class="card" style="margin-bottom:0; flex:2;">
+          <label>Filas (header + <code>date,amount,payee[,memo]</code>)</label>
+          <textarea name="pasted" placeholder="date,amount,payee&#10;2026-07-02,-50.00,Uber" style="min-height: 100px;"></textarea>
+        </div>
+      </div>
+      <button type="submit" style="margin-top:16px; width: 100%;">Ingerir filas manuales</button>
     </form>
   </div>
 </div>
 
-<div class="card">
-  <h3>Imports</h3>
-  {% if imports %}
-  <table>
-    <thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th>Formato</th><th>Estado de filas</th><th></th></tr></thead>
-    <tbody>
-      {% for imp in imports %}
-      <tr>
-        <td class="muted">{{ imp.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-        <td>{{ imp.source_bank }}</td>
-        <td class="muted">{{ imp.source_file }}</td>
-        <td>{{ imp.format }}</td>
-        <td>
-          {% for st, n in counts[imp.id].items() %}
-            <span class="pill s-{{ st }}">{{ st }}: {{ n }}</span>
+<!-- 3. Tables Section (Imports and Batches side-by-side or stacked grid) -->
+<div class="dashboard-columns">
+  <!-- Left column: Recent Imports -->
+  <div class="card" style="margin-bottom:0">
+    <div class="section-label" style="margin-bottom:16px">Historial de Importaciones</div>
+    {% if imports %}
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Fuente</th>
+            <th>Archivo</th>
+            <th>Estado filas</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for imp in imports[:8] %}
+          <tr>
+            <td class="muted" style="font-size:12px;">{{ imp.created_at.strftime("%b %d, %H:%M") }}</td>
+            <td><code>{{ imp.source_bank }}</code></td>
+            <td class="muted" title="{{ imp.source_file }}" style="font-size:12px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {{ imp.source_file }}
+            </td>
+            <td>
+              {% for st, n in counts[imp.id].items() %}
+                {% if n > 0 %}
+                  <span class="pill s-{{ st }}" style="font-size:10px; padding: 0px 6px;">{{ st }}: {{ n }}</span>
+                {% endif %}
+              {% endfor %}
+            </td>
+            <td><a class="btn secondary" href="/imports/{{ imp.id }}" style="font-size:12px; padding: 4px 8px;">Revisar</a></td>
+          </tr>
           {% endfor %}
-        </td>
-        <td><a class="btn secondary" href="/imports/{{ imp.id }}">Revisar</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="muted">Todavía no hay imports.</p>{% endif %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted">No hay importaciones recientes.</p>
+    {% endif %}
+  </div>
+
+  <!-- Right column: Batches -->
+  <div class="card" style="margin-bottom:0">
+    <div class="section-label" style="margin-bottom:16px">Lotes Sincronizados</div>
+    {% if batches %}
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Batch</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in batches[:8] %}
+          <tr>
+            <td class="muted">
+              <code>{{ b.id[:12] }}...</code>
+              <div style="font-size:11px;">{{ b.created_at.strftime("%Y-%m-%d") }}</div>
+            </td>
+            <td>
+              <span class="pill s-{{ 'synced' if b.status.value=='pushed' else 'approved' }}" style="font-size:11px;">
+                {{ b.status.value }}
+              </span>
+            </td>
+            <td><a class="btn secondary" href="/batches/{{ b.id }}" style="font-size:12px; padding: 4px 8px;">Ver</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted">No hay batches generados.</p>
+    {% endif %}
+  </div>
 </div>
 
-<div class="card">
-  <h3>Batches</h3>
-  {% if batches %}
-  <table>
-    <thead><tr><th>Fecha</th><th>Batch</th><th>Estado</th><th>Aprobado por</th><th></th></tr></thead>
-    <tbody>
-      {% for b in batches %}
-      <tr>
-        <td class="muted">{{ b.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-        <td><code>{{ b.id }}</code></td>
-        <td><span class="pill s-{{ 'synced' if b.status.value=='pushed' else 'approved' }}">{{ b.status.value }}</span></td>
-        <td>{{ b.approved_by or "" }}</td>
-        <td><a class="btn secondary" href="/batches/{{ b.id }}">Ver</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="muted">Todavía no hay batches.</p>{% endif %}
-</div>
+<script>
+  // Drag & Drop engine setup
+  const dropzoneOverlay = document.getElementById('dropzone-overlay');
+  const globalInput = document.getElementById('global-drag-input');
+  const globalForm = document.getElementById('global-drag-form');
+
+  // Trigger file selection on card click
+  function triggerUpload() {
+    globalInput.click();
+  }
+
+  globalInput.addEventListener('change', () => {
+    if (globalInput.files.length > 0) {
+      globalForm.submit();
+    }
+  });
+
+  // Global Drag listeners
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dropzoneOverlay.classList.add('visible');
+  });
+
+  dropzoneOverlay.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  });
+
+  dropzoneOverlay.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget === null || !dropzoneOverlay.contains(e.relatedTarget)) {
+      dropzoneOverlay.classList.remove('visible');
+    }
+  });
+
+  dropzoneOverlay.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzoneOverlay.classList.remove('visible');
+    if (e.dataTransfer.files.length > 0) {
+      globalInput.files = e.dataTransfer.files;
+      globalForm.submit();
+    }
+  });
+
+  // Collapsible sections
+  function toggleCollapsible(contentId, chevronId) {
+    const content = document.getElementById(contentId);
+    const chevron = document.getElementById(chevronId);
+    content.classList.toggle('expanded');
+    chevron.classList.toggle('rotated');
+  }
+
+  // Pre-fill the current month header accurately
+  const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const now = new Date();
+  document.getElementById('current-month-period').textContent = `${months[now.getMonth()]} ${now.getFullYear()}`;
+</script>
 
 {% endblock %}
