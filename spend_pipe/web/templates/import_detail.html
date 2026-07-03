@@ -313,6 +313,40 @@
   @keyframes busyspin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   #busy-loader .busy-title { font-size: 20px; font-weight: 700; color: var(--fg); margin-bottom: 8px; }
   #busy-loader .busy-sub { color: var(--muted); font-size: 14px; }
+
+  /* Columna payee unificada: doble click edita, ↺ restaura si cambió */
+  .payee-wrap { position: relative; display: flex; align-items: center; gap: 6px; }
+  .payee-input[readonly] {
+    background: transparent;
+    border-color: transparent;
+    cursor: default;
+    text-overflow: ellipsis;
+  }
+  .payee-input[readonly]:hover { border-color: var(--line); }
+  .payee-reset {
+    display: none;
+    cursor: pointer;
+    color: var(--warn);
+    font-size: 15px;
+    font-weight: 700;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .payee-wrap.changed .payee-reset { display: inline; }
+  .payee-wrap.changed .payee-input { border-color: var(--warn); }
+
+  /* Badge de categoría llenada automáticamente */
+  .auto-pill {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    background: rgba(79, 140, 255, 0.14);
+    color: var(--accent);
+    white-space: nowrap;
+  }
 </style>
 
 <div id="busy-loader">
@@ -327,6 +361,25 @@
     document.getElementById('busy-sub').textContent = sub || '';
     document.getElementById('busy-loader').style.display = 'flex';
     return true;
+  }
+
+  // ── Columna payee unificada ──
+  function enablePayeeEdit(input) {
+    input.readOnly = false;
+    input.focus();
+    input.select();
+  }
+  function onPayeeInput(input) {
+    input.closest('.payee-wrap').classList.toggle('changed', input.value !== input.dataset.original);
+  }
+  function onPayeeBlur(input) {
+    if (input.value === input.dataset.original) input.readOnly = true;
+  }
+  function resetPayee(link) {
+    const input = link.closest('.payee-wrap').querySelector('.payee-input');
+    input.value = input.dataset.original;
+    input.readOnly = true;
+    link.closest('.payee-wrap').classList.remove('changed');
   }
 </script>
 
@@ -364,9 +417,9 @@
     </form>
     {% endif %}
     <form action="/imports/{{ imp.id }}/ai-categorize" method="post"
-          onsubmit="return showBusy('Consultando a la IA…', 'Categorizando las filas sin regla en lotes. Esto puede tardar un minuto.')">
+          onsubmit="return showBusy('Auto-clasificando…', 'Categorizando las filas sin regla en lotes. Esto puede tardar un minuto.')">
       <button type="submit" class="secondary" {{ '' if ai_enabled else 'disabled title="Configura tu API key de Anthropic en el inicio"' }}>
-        ✨ Sugerir categorías con IA
+        ✨ Auto-classify
       </button>
     </form>
   </div>
@@ -438,8 +491,7 @@
         <thead>
           <tr>
             <th>Fecha</th>
-            <th>Original</th>
-            <th>Nombre Payee</th>
+            <th>Payee</th>
             <th>Categoría</th>
             <th class="num">Monto</th>
             <th>Estado</th>
@@ -454,9 +506,15 @@
           {% if not needs_rev %}
           <tr style="opacity: 0.85;">
             <td class="muted">{{ t.date }}</td>
-            <td class="muted" title="{{ t.raw_payee }}">{{ t.raw_payee[:24] }}</td>
-            <td><input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
-                style="padding: 4px 8px; font-size:12.5px;"></td>
+            <td title="Original del banco: {{ t.raw_payee }} — doble click para editar">
+              <div class="payee-wrap">
+                <input type="text" name="payee_{{ t.id }}" class="clean-input payee-input"
+                  value="{{ t.payee or t.raw_payee }}" data-original="{{ t.payee or t.raw_payee }}"
+                  style="padding: 4px 8px; font-size:12.5px;"
+                  readonly ondblclick="enablePayeeEdit(this)" oninput="onPayeeInput(this)" onblur="onPayeeBlur(this)">
+                <a class="payee-reset" onclick="resetPayee(this)" title="Restaurar el valor original">↺</a>
+              </div>
+            </td>
             <td>
               <select name="category_{{ t.id }}" class="clean-input" style="padding: 4px 8px; font-size:12.5px;">
                 <option value="">— Sin categoría —</option>
@@ -471,6 +529,9 @@
                 </optgroup>
                 {% endfor %}
               </select>
+              {% if t.category and t.confidence is not none and t.confidence < 1.0 %}
+              <span class="auto-pill" title="Categoría llenada automáticamente">✨ auto</span>
+              {% endif %}
             </td>
             <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight:600;">{{ '%.2f'|format(t.amount) }}
             </td>
@@ -512,10 +573,9 @@
         <tr>
           <th style="width: 100px; padding-left:14px; cursor:pointer;" onclick="sortTable(0, 'date')"
             title="Ordenar por Fecha">Fecha ⇅</th>
-          <th style="cursor:pointer;" onclick="sortTable(1, 'payee')" title="Ordenar por Original">Original ⇅</th>
-          <th>Establecer Payee</th>
+          <th style="cursor:pointer;" onclick="sortTable(1, 'payee')" title="Ordenar por payee — doble click en el campo para editar">Payee ⇅</th>
           <th>Categoría</th>
-          <th class="num" style="width:110px; cursor:pointer;" onclick="sortTable(4, 'amount')"
+          <th class="num" style="width:110px; cursor:pointer;" onclick="sortTable(3, 'amount')"
             title="Ordenar por Monto">Monto ⇅</th>
           <th style="width: 120px;">Estado</th>
           <th style="width: 50px;">Dup</th>
@@ -533,18 +593,19 @@
           class="txn-row {{ 'status-approved-row' if t.status.value == 'approved' else ('status-rejected-row' if t.status.value == 'rejected' else '') }}"
           id="txn-row-{{ t.id }}" data-txn-id="{{ t.id }}" data-raw-payee="{{ t.raw_payee }}">
           <td class="muted" style="padding-left:14px; font-size:13px;">{{ t.date }}</td>
-          <td class="muted" title="{{ t.raw_payee }}" style="font-size:12.5px; position:relative;">
-            {{ t.raw_payee[:26] }}
+          <td title="Original del banco: {{ t.raw_payee }} — doble click para editar">
+            <div class="payee-wrap">
+              <input type="text" name="payee_{{ t.id }}" class="clean-input payee-input"
+                value="{{ t.payee or t.raw_payee }}" data-original="{{ t.payee or t.raw_payee }}"
+                readonly ondblclick="enablePayeeEdit(this)" oninput="onPayeeInput(this)" onblur="onPayeeBlur(this)">
+              <a class="payee-reset" onclick="resetPayee(this)" title="Restaurar el valor original">↺</a>
+            </div>
             {% if t.raw_payee and t.raw_payee in payee_dupes %}
             <div style="margin-top:2px;">
               <a href="#" onclick="event.preventDefault(); applyValuesToAll('{{ t.id }}')" class="propagate-link"
                 title="Propagar payee y categoría a todas las transacciones idénticas">⇅ Clonar iguales</a>
             </div>
             {% endif %}
-          </td>
-          <td>
-            <input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
-              placeholder="Nombre legible">
           </td>
           <td>
             <div id="primary_category_wrap_{{ t.id }}"
@@ -564,6 +625,9 @@
                 {% endfor %}
               </select>
             </div>
+            {% if t.category and t.confidence is not none and t.confidence < 1.0 %}
+            <span class="auto-pill" title="Categoría llenada automáticamente — confírmala o cámbiala">✨ auto</span>
+            {% endif %}
             {% if drafts %}
             <div class="muted" style="font-size:11px; font-weight:600; padding:4px 0;">La categoría vive en los splits.
             </div>
@@ -604,7 +668,7 @@
 
         <!-- Splits panel row -->
         <tr id="split_panel_row_{{ t.id }}" class="split-panel-row {{ 'open' if drafts else '' }}">
-          <td colspan="9" style="padding: 0 14px 14px 14px; background: rgba(0,0,0,0.05);">
+          <td colspan="8" style="padding: 0 14px 14px 14px; background: rgba(0,0,0,0.05);">
             <div class="split-panel" data-txn-id="{{ t.id }}" data-parent-amount="{{ '%.2f'|format(t.amount) }}"
               data-is-transfer="{{ 'true' if t.is_transfer else 'false' }}">
               <div class="split-panel-head">
@@ -661,7 +725,7 @@
 
         {% if ns.needs_review_count == 0 %}
         <tr>
-          <td colspan="9" style="text-align:center; padding: 40px; color: var(--muted); font-size: 15px;">
+          <td colspan="8" style="text-align:center; padding: 40px; color: var(--muted); font-size: 15px;">
             🎉 ¡Bandeja de excepciones limpia! No quedan transacciones que requieran revisión manual.
           </td>
         </tr>
