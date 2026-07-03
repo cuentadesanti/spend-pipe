@@ -547,6 +547,46 @@ async def save_import(import_id: str, request: Request, db: Session = Depends(ge
     return RedirectResponse(f"/imports/{import_id}", status_code=303)
 
 
+# ── Abortar un import equivocado ─────────────────────────────────────────────
+@app.post("/imports/{import_id}/delete")
+def delete_import(import_id: str, db: Session = Depends(get_db)):
+    """Borra el import y sus filas del staging. Nada llegó a Actual salvo que se
+    haya pusheado: si hay filas synced-por-push se bloquea (habría que limpiar
+    Actual primero). Las adoptadas solo pierden el claim (el espejo las vuelve
+    a ofrecer); al borrar el Import se libera el file-hash → re-subir el archivo
+    correcto (o el mismo) vuelve a procesarse desde cero.
+    """
+    from sqlalchemy import update
+
+    imp = db.get(Import, import_id)
+    if imp is None:
+        return RedirectResponse("/", status_code=303)
+    txns = db.scalars(select(Transaction).where(Transaction.import_id == import_id)).all()
+
+    pushed = [t for t in txns if t.status == TxnStatus.synced and t.sync_origin == "push"]
+    if pushed:
+        return RedirectResponse(
+            f"/imports/{import_id}?detected=No se puede eliminar: {len(pushed)} filas ya están en Actual (pusheadas)",
+            status_code=303,
+        )
+
+    ids = [t.id for t in txns]
+    # Deshacer pares de transferencia (la pata del otro import queda libre).
+    for t in txns:
+        if t.transfer_pair_id:
+            unpair(db, t)
+    # Limpiar referencias duplicate_of desde filas de OTROS imports.
+    if ids:
+        db.execute(
+            update(Transaction)
+            .where(Transaction.duplicate_of.in_(ids))
+            .values(duplicate_of=None, is_duplicate=False)
+        )
+    db.delete(imp)   # cascade delete-orphan borra sus transacciones (y splits)
+    db.commit()
+    return RedirectResponse("/", status_code=303)
+
+
 # ── Ajustes (API key de IA desde la UI; persiste en la base) ────────────────
 @app.post("/settings/ai")
 def save_ai_settings(

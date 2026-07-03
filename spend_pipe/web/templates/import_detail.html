@@ -385,6 +385,13 @@
 
 <div class="detail-nav">
   <a href="/" class="back-btn">← Ir al Dashboard</a>
+  <form action="/imports/{{ imp.id }}/delete" method="post" style="margin:0"
+        onsubmit="return confirm('¿Eliminar este import completo del staging?\n\nNada se borra de Actual (solo lo no-pusheado se puede eliminar). Podrás volver a subir el archivo correcto.')">
+    <button type="submit" class="secondary"
+            style="background:rgba(224,92,92,0.12); color:var(--bad); border:1px solid rgba(224,92,92,0.3); padding:6px 12px; font-size:12.5px;">
+      🗑 Eliminar import
+    </button>
+  </form>
 </div>
 
 {% if detected %}
