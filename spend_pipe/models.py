@@ -85,6 +85,37 @@ class CsvMapping(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ActualMirror(Base):
+    """Espejo local de las transacciones que YA existen en Actual (cualquier origen:
+    imports legacy de finanzas-ai, entradas manuales, pushes de spend-pipe).
+
+    Es lo que le da visibilidad al matcher de reconciliación sobre data histórica que
+    spend-pipe no ingirió — sin esto, el dedup solo ve su propio staging y un push de
+    un archivo con historia puede doble-contar contra imports legacy (caso real:
+    'Movimientos de Cuenta.xls' con 483 txns de un año, ids formato finanzas-ai).
+    Se refresca vía node-pusher/get_transactions.js (solo lectura).
+    """
+
+    __tablename__ = "actual_mirror"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: _uuid("mir"))
+    actual_txn_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    account_name: Mapped[str] = mapped_column(String, index=True)   # nombre en Actual (destino)
+    date: Mapped[Date] = mapped_column(index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, index=True)  # Actual guarda centavos
+    payee_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    category_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    imported_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_parent: Mapped[bool] = mapped_column(Boolean, default=False)     # padre de splits
+    transfer_id: Mapped[str | None] = mapped_column(String, nullable=True)  # pata vinculada
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# Búsqueda del matcher: cuenta + monto (+ fecha por rango).
+Index("ix_mirror_match", ActualMirror.account_name, ActualMirror.amount_cents, ActualMirror.date)
+
+
 class Import(Base):
     """Un archivo cargado. Entidad de primera clase: permite auditar y hacer rollback."""
 
@@ -158,8 +189,15 @@ class Transaction(Base):
     is_duplicate: Mapped[bool] = mapped_column(Boolean, default=False)
     duplicate_of: Mapped[str | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
 
-    # --- resultado del push ---
+    # --- resultado del push / reconciliación ---
     actual_txn_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Cómo llegó a synced: 'push' (la empujamos) | 'adopted' (ya existía en Actual,
+    # p.ej. de un import legacy, y la reclamamos en vez de re-insertarla).
+    sync_origin: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Match dudoso de reconciliación (nivel 3): candidato en el espejo, pendiente de
+    # que un humano acepte (→ adopción) o rechace (→ queda como nueva).
+    match_candidate_id: Mapped[str | None] = mapped_column(ForeignKey("actual_mirror.id"), nullable=True)
+    match_tier: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1..4, ver reconcile.py
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
