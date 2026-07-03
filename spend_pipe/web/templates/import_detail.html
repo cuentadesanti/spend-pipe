@@ -272,6 +272,22 @@
   .txn-row.resolved-visible {
     opacity: 0.4 !important;
   }
+
+  .propagate-link {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+    opacity: 0.75;
+    transition: opacity 0.2s;
+    cursor: pointer;
+    display: inline-block;
+  }
+
+  .propagate-link:hover {
+    opacity: 1;
+    text-decoration: underline;
+  }
 </style>
 
 <div class="detail-nav">
@@ -400,11 +416,13 @@
     <table class="surgery-table">
       <thead>
         <tr>
-          <th style="width: 100px; padding-left:14px;">Fecha</th>
-          <th>Original</th>
+          <th style="width: 100px; padding-left:14px; cursor:pointer;" onclick="sortTable(0, 'date')"
+            title="Ordenar por Fecha">Fecha ⇅</th>
+          <th style="cursor:pointer;" onclick="sortTable(1, 'payee')" title="Ordenar por Original">Original ⇅</th>
           <th>Establecer Payee</th>
           <th>Categoría</th>
-          <th class="num" style="width:110px;">Monto</th>
+          <th class="num" style="width:110px; cursor:pointer;" onclick="sortTable(4, 'amount')"
+            title="Ordenar por Monto">Monto ⇅</th>
           <th style="width: 120px;">Estado</th>
           <th style="width: 50px;">Dup</th>
           <th style="width: 50px;">⇄</th>
@@ -417,10 +435,19 @@
         {% set drafts = split_drafts.get(t.id, []) %}
         {% set needs_rev = (t.status.value == 'needs_review' or has_errors or drafts|length > 0 or t.pending) %}
         {% if needs_rev %}
-        <tr class="txn-row" id="txn-row-{{ t.id }}" data-txn-id="{{ t.id }}"
-          class="{{ 'status-approved-row' if t.status.value == 'approved' else ('status-rejected-row' if t.status.value == 'rejected' else '') }}">
+        <tr
+          class="txn-row {{ 'status-approved-row' if t.status.value == 'approved' else ('status-rejected-row' if t.status.value == 'rejected' else '') }}"
+          id="txn-row-{{ t.id }}" data-txn-id="{{ t.id }}" data-raw-payee="{{ t.raw_payee }}">
           <td class="muted" style="padding-left:14px; font-size:13px;">{{ t.date }}</td>
-          <td class="muted" title="{{ t.raw_payee }}" style="font-size:12.5px;">{{ t.raw_payee[:26] }}</td>
+          <td class="muted" title="{{ t.raw_payee }}" style="font-size:12.5px; position:relative;">
+            {{ t.raw_payee[:26] }}
+            {% if t.raw_payee %}
+            <div style="margin-top:2px;">
+              <a href="#" onclick="event.preventDefault(); applyValuesToAll('{{ t.id }}')" class="propagate-link"
+                title="Propagar payee y categoría a todas las transacciones idénticas">⇅ Clonar iguales</a>
+            </div>
+            {% endif %}
+          </td>
           <td>
             <input type="text" name="payee_{{ t.id }}" class="clean-input" value="{{ t.payee or '' }}"
               placeholder="Nombre legible">
@@ -851,8 +878,105 @@
     if (remove) {
       remove.closest('.split-row').remove();
       recalcAllPanels();
+      return;
     }
   });
+
+  // ----------------------------------------------------
+  // Column Sorting & Propagation logic
+  // ----------------------------------------------------
+  let currentSortCol = null;
+  let currentSortAsc = true;
+
+  function sortTable(columnIndex, type) {
+    const tbody = document.getElementById('needs-review-tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr.txn-row'));
+
+    if (currentSortCol === columnIndex) {
+      currentSortAsc = !currentSortAsc;
+    } else {
+      currentSortCol = columnIndex;
+      currentSortAsc = true;
+    }
+
+    rows.sort((a, b) => {
+      let valA, valB;
+
+      if (type === 'date') {
+        valA = a.cells[0].innerText.trim();
+        valB = b.cells[0].innerText.trim();
+      } else if (type === 'payee') {
+        valA = a.cells[1].innerText.trim().toLowerCase();
+        valB = b.cells[1].innerText.trim().toLowerCase();
+      } else if (type === 'amount') {
+        valA = parseFloat(a.cells[4].innerText.replace(/[^0-9.-]/g, ''));
+        valB = parseFloat(b.cells[4].innerText.replace(/[^0-9.-]/g, ''));
+      }
+
+      if (valA < valB) return currentSortAsc ? -1 : 1;
+      if (valA > valB) return currentSortAsc ? 1 : -1;
+      return 0;
+    });
+
+    rows.forEach(row => {
+      tbody.appendChild(row);
+      const txnId = row.dataset.txnId;
+      const splitRow = document.getElementById(`split_panel_row_${txnId}`);
+      if (splitRow) {
+        tbody.appendChild(splitRow);
+      }
+    });
+
+    updateTxnRowsList();
+    if (activeIndex !== -1) {
+      setActiveRow(0);
+    }
+  }
+
+  function applyValuesToAll(sourceTxnId) {
+    const sourceRow = document.getElementById(`txn-row-${sourceTxnId}`);
+    if (!sourceRow) return;
+    const rawPayee = sourceRow.dataset.rawPayee;
+    if (!rawPayee) return;
+
+    const sourcePayeeInput = sourceRow.querySelector(`input[name="payee_${sourceTxnId}"]`);
+    const sourceCategorySelect = sourceRow.querySelector(`#category_${sourceTxnId}`);
+
+    const payeeVal = sourcePayeeInput ? sourcePayeeInput.value : '';
+    const categoryVal = sourceCategorySelect ? sourceCategorySelect.value : '';
+
+    const rows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')];
+    let count = 0;
+
+    rows.forEach(row => {
+      if (row.id === `txn-row-${sourceTxnId}`) return;
+
+      const currentRaw = row.dataset.rawPayee;
+      if (currentRaw === rawPayee) {
+        const targetId = row.dataset.txnId;
+        const targetPayeeInput = row.querySelector(`input[name="payee_${targetId}"]`);
+        const targetCategorySelect = row.querySelector(`#category_${targetId}`);
+
+        if (targetPayeeInput && payeeVal) {
+          targetPayeeInput.value = payeeVal;
+        }
+
+        if (targetCategorySelect && categoryVal) {
+          targetCategorySelect.value = categoryVal;
+          const statusSelect = row.querySelector(`select[name^="status_"]`);
+          if (statusSelect && statusSelect.value === 'needs_review') {
+            statusSelect.value = 'approved';
+            row.classList.remove('status-rejected-row');
+            row.classList.add('status-approved-row');
+          }
+        }
+        count++;
+      }
+    });
+
+    alert(`Se propagaron el Payee y la Categoría a las ${count} transacciones con el mismo origen "${rawPayee}".`);
+    updateSyncStates();
+  }
 
   document.addEventListener('input', (event) => {
     if (event.target.name && event.target.name.includes('split_')) recalcAllPanels();
@@ -865,14 +989,15 @@
   let txnRows = [];
 
   function updateTxnRowsList() {
-    txnRows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')];
+    txnRows = [...document.querySelectorAll('#needs-review-tbody tr.txn-row')].filter(row => !row.classList.contains('resolved-hidden'));
   }
 
   function setActiveRow(index) {
-    if (index < 0 || index >= txnRows.length) return;
+    document.querySelectorAll('#needs-review-tbody tr.txn-row').forEach(r => r.classList.remove('active-row'));
 
-    if (activeIndex >= 0 && activeIndex < txnRows.length) {
-      txnRows[activeIndex].classList.remove('active-row');
+    if (index < 0 || index >= txnRows.length) {
+      activeIndex = -1;
+      return;
     }
 
     activeIndex = index;
@@ -917,10 +1042,14 @@
         const select = row.querySelector('select[name^="status_"]');
         if (select) {
           select.value = 'approved';
+          const oldIndex = activeIndex;
           updateSyncStates();
-          // Navegar abajo automatically
-          if (activeIndex < txnRows.length - 1) {
-            setActiveRow(activeIndex + 1);
+          // compute placement index for next active row
+          if (txnRows.length > 0) {
+            const newIndex = Math.min(oldIndex, txnRows.length - 1);
+            setActiveRow(newIndex);
+          } else {
+            activeIndex = -1;
           }
         }
       }
