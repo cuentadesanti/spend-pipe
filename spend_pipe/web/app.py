@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,8 +67,15 @@ def get_db():
 
 
 def _import_txns(db: Session, import_id: str) -> list[Transaction]:
+    # selectinload evita el N+1 de splits: sin esto, cada fila lazy-carga sus splits
+    # en un round-trip aparte (353 filas ≈ 357 queries ≈ 15s contra Supabase → 499).
+    from sqlalchemy.orm import selectinload
+
     return db.scalars(
-        select(Transaction).where(Transaction.import_id == import_id).order_by(Transaction.date, Transaction.created_at)
+        select(Transaction)
+        .options(selectinload(Transaction.splits))
+        .where(Transaction.import_id == import_id)
+        .order_by(Transaction.date, Transaction.created_at)
     ).all()
 
 
@@ -91,10 +99,14 @@ def _render_import_detail(
         categories_by_group.setdefault(cat["group_name"], []).append(cat)
 
     # Reconciliación: candidatos legacy de las filas con match pendiente.
-    candidates = {
-        t.id: db.get(ActualMirror, t.match_candidate_id)
-        for t in txns if t.match_candidate_id and t.actual_txn_id is None
-    }
+    # Un solo IN-query en lugar de un db.get() por fila (mismo anti-N+1 de arriba).
+    pending = [t for t in txns if t.match_candidate_id and t.actual_txn_id is None]
+    mirror_ids = {t.match_candidate_id for t in pending}
+    mirrors = {
+        m.id: m
+        for m in db.scalars(select(ActualMirror).where(ActualMirror.id.in_(mirror_ids))).all()
+    } if mirror_ids else {}
+    candidates = {t.id: mirrors[t.match_candidate_id] for t in pending if t.match_candidate_id in mirrors}
     recon = {
         "mirror_rows": mirror_size(db),
         "tier2": [t for t in txns if t.match_tier == 2 and t.id in candidates],
@@ -117,6 +129,8 @@ def _render_import_detail(
             "categories_by_group": categories_by_group,
             "recon": recon,
             "ai_enabled": ai.is_enabled(db),
+            # payees con más de una fila en este import: solo ahí tiene sentido "clonar iguales"
+            "payee_dupes": {p for p, n in Counter(t.raw_payee for t in txns).items() if n > 1},
         },
     )
 

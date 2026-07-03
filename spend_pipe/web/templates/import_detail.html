@@ -290,6 +290,46 @@
   }
 </style>
 
+<style>
+  #busy-loader {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 17, 21, 0.96);
+    z-index: 99999;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  #busy-loader .spinner {
+    width: 60px; height: 60px;
+    border: 5px solid rgba(79, 140, 255, 0.15);
+    border-top: 5px solid var(--accent);
+    border-radius: 50%;
+    animation: busyspin 1s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+    margin-bottom: 24px;
+    box-shadow: 0 0 15px rgba(79, 140, 255, 0.2);
+  }
+  @keyframes busyspin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  #busy-loader .busy-title { font-size: 20px; font-weight: 700; color: var(--fg); margin-bottom: 8px; }
+  #busy-loader .busy-sub { color: var(--muted); font-size: 14px; }
+</style>
+
+<div id="busy-loader">
+  <div class="spinner"></div>
+  <div class="busy-title" id="busy-title">Trabajando…</div>
+  <div class="busy-sub" id="busy-sub"></div>
+</div>
+
+<script>
+  function showBusy(title, sub) {
+    document.getElementById('busy-title').textContent = title;
+    document.getElementById('busy-sub').textContent = sub || '';
+    document.getElementById('busy-loader').style.display = 'flex';
+    return true;
+  }
+</script>
+
 <div class="detail-nav">
   <a href="/" class="back-btn">← Ir al Dashboard</a>
 </div>
@@ -310,7 +350,8 @@
     {% if recon.tier3 %} · <span class="pill s-needs_review">{{ recon.tier3|length }} dudosas</span>{% endif %}
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
-    <form action="/imports/{{ imp.id }}/reconcile" method="post" style="display:flex; gap:8px; align-items:center">
+    <form action="/imports/{{ imp.id }}/reconcile" method="post" style="display:flex; gap:8px; align-items:center"
+          onsubmit="return showBusy('Reconciliando contra Actual…', this.refresh.checked ? 'Descargando el espejo desde PikaPods (~30-60s) y matcheando.' : 'Matcheando contra el espejo local.')">
       <label style="display:flex; gap:6px; align-items:center; margin:0; font-size:12px; color:var(--muted)">
         <input type="checkbox" name="refresh" checked> refrescar espejo (lento, ~30s)
       </label>
@@ -322,7 +363,8 @@
       <button type="submit">Adoptar {{ recon.tier2|length }} existentes</button>
     </form>
     {% endif %}
-    <form action="/imports/{{ imp.id }}/ai-categorize" method="post">
+    <form action="/imports/{{ imp.id }}/ai-categorize" method="post"
+          onsubmit="return showBusy('Consultando a la IA…', 'Categorizando las filas sin regla en lotes. Esto puede tardar un minuto.')">
       <button type="submit" class="secondary" {{ '' if ai_enabled else 'disabled title="Configura tu API key de Anthropic en el inicio"' }}>
         ✨ Sugerir categorías con IA
       </button>
@@ -493,7 +535,7 @@
           <td class="muted" style="padding-left:14px; font-size:13px;">{{ t.date }}</td>
           <td class="muted" title="{{ t.raw_payee }}" style="font-size:12.5px; position:relative;">
             {{ t.raw_payee[:26] }}
-            {% if t.raw_payee %}
+            {% if t.raw_payee and t.raw_payee in payee_dupes %}
             <div style="margin-top:2px;">
               <a href="#" onclick="event.preventDefault(); applyValuesToAll('{{ t.id }}')" class="propagate-link"
                 title="Propagar payee y categoría a todas las transacciones idénticas">⇅ Clonar iguales</a>
