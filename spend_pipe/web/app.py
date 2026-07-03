@@ -50,6 +50,10 @@ def _startup() -> None:
     settings.storage_root.mkdir(parents=True, exist_ok=True)
     INBOX_DIR.mkdir(exist_ok=True)
     settings.resolved_artifacts_dir.mkdir(exist_ok=True)
+    # Pre-calentar las listas de Actual SIN bloquear el arranque (cura del 499:
+    # el fetch tarda 10-60s; la primera request sirve fallback y esto la reemplaza).
+    categories_cache.refresh_in_background()
+    accounts_cache.refresh_in_background()
 
 
 def get_db():
@@ -179,128 +183,36 @@ def _apply_review_form(
     return split_errors, split_drafts
 
 
-_CATEGORIES_CACHE: list[dict] = []
-CATEGORIES_CACHE_FILE = BASE_DIR / ".categories_cache.json"
+# Listas de Actual con cache stale-while-revalidate: las requests NUNCA se
+# bloquean en el subprocess de Node (cura del 499); ver node_cache.py.
+from .node_cache import NodeListCache
+
+_FALLBACK_CATEGORIES = [
+    {"name": "Comida fuera", "group_name": "Gastos variables"},
+    {"name": "Suscripciones", "group_name": "Gastos fijos"},
+    {"name": "Supermercado", "group_name": "Gastos variables"},
+    {"name": "Transporte", "group_name": "Gastos variables"},
+    {"name": "Luz / Electricidad", "group_name": "Servicios"},
+    {"name": "Internet", "group_name": "Servicios"},
+]
+
+categories_cache = NodeListCache(
+    "get_categories.js", BASE_DIR / ".categories_cache.json", NODE_PUSHER,
+    fallback=_FALLBACK_CATEGORIES,
+)
+accounts_cache = NodeListCache(
+    "get_accounts.js", BASE_DIR / ".accounts_cache.json", NODE_PUSHER,
+)
+
 
 def get_actual_categories() -> list[dict]:
-    import time
-    global _CATEGORIES_CACHE
-    if _CATEGORIES_CACHE:
-        return _CATEGORIES_CACHE
+    return categories_cache.get()
 
-    if CATEGORIES_CACHE_FILE.exists():
-        try:
-            mtime = CATEGORIES_CACHE_FILE.stat().st_mtime
-            if time.time() - mtime < 14400:  # 4 hours TTL
-                data = json.loads(CATEGORIES_CACHE_FILE.read_text(encoding="utf-8"))
-                if data:
-                    _CATEGORIES_CACHE = data
-                    return _CATEGORIES_CACHE
-        except Exception as e:
-            print(f"Error reading categories cache file: {e}")
-
-    try:
-        proc = subprocess.run(
-            ["node", "get_categories.js"],
-            cwd=str(NODE_PUSHER),
-            capture_output=True,
-            text=True,
-            timeout=12,
-        )
-        if proc.returncode == 0:
-            lines = proc.stdout.splitlines()
-            json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
-            if json_line:
-                data = json.loads(json_line[0])
-                if data:
-                    try:
-                        CATEGORIES_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
-                    except Exception as we:
-                        print(f"Error writing categories cache file: {we}")
-                    _CATEGORIES_CACHE = data
-                    return _CATEGORIES_CACHE
-    except Exception as e:
-        print(f"Error fetching actual categories: {e}")
-
-    if CATEGORIES_CACHE_FILE.exists():
-        try:
-            data = json.loads(CATEGORIES_CACHE_FILE.read_text(encoding="utf-8"))
-            if data:
-                _CATEGORIES_CACHE = data
-                return _CATEGORIES_CACHE
-        except Exception:
-            pass
-
-    return [
-        {"name": "Comida fuera", "group_name": "Gastos variables"},
-        {"name": "Suscripciones", "group_name": "Gastos fijos"},
-        {"name": "Supermercado", "group_name": "Gastos variables"},
-        {"name": "Transporte", "group_name": "Gastos variables"},
-        {"name": "Luz / Electricidad", "group_name": "Servicios"},
-        {"name": "Internet", "group_name": "Servicios"},
-    ]
-
-
-_ACCOUNTS_CACHE: list[dict] = []
-ACCOUNTS_CACHE_FILE = BASE_DIR / ".accounts_cache.json"
 
 def get_actual_accounts() -> list[dict]:
-    import time
-    global _ACCOUNTS_CACHE
-    if _ACCOUNTS_CACHE:
-        return _ACCOUNTS_CACHE
-
-    if ACCOUNTS_CACHE_FILE.exists():
-        try:
-            mtime = ACCOUNTS_CACHE_FILE.stat().st_mtime
-            if time.time() - mtime < 14400:  # 4 hours TTL
-                data = json.loads(ACCOUNTS_CACHE_FILE.read_text(encoding="utf-8"))
-                if data:
-                    _ACCOUNTS_CACHE = data
-                    return _ACCOUNTS_CACHE
-        except Exception as e:
-            print(f"Error reading accounts cache file: {e}")
-
-    try:
-        proc = subprocess.run(
-            ["node", "get_accounts.js"],
-            cwd=str(NODE_PUSHER),
-            capture_output=True,
-            text=True,
-            timeout=12,
-        )
-        if proc.returncode == 0:
-            lines = proc.stdout.splitlines()
-            json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
-            if json_line:
-                data = json.loads(json_line[0])
-                if data:
-                    try:
-                        ACCOUNTS_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
-                    except Exception as we:
-                        print(f"Error writing accounts cache file: {we}")
-                    _ACCOUNTS_CACHE = data
-                    return _ACCOUNTS_CACHE
-    except Exception as e:
-        print(f"Error fetching actual accounts: {e}")
-
-    if ACCOUNTS_CACHE_FILE.exists():
-        try:
-            data = json.loads(ACCOUNTS_CACHE_FILE.read_text(encoding="utf-8"))
-            if data:
-                _ACCOUNTS_CACHE = data
-                return _ACCOUNTS_CACHE
-        except Exception:
-            pass
-
-    return [
-        {"name": "BBVA Cuenta Digital (MXN)"},
-        {"name": "BBVA TDC"},
-        {"name": "Openbank Nómina (EUR)"}
-    ]
+    return accounts_cache.get()
 
 
-# ── Home ───────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, month: str = None, db: Session = Depends(get_db)):
     imports = db.scalars(select(Import).order_by(Import.created_at.desc())).all()
