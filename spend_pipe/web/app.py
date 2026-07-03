@@ -28,6 +28,8 @@ from ..parsers import available_parsers
 from ..parsers.csv_generic import CsvColumnMap, GenericCsvParser
 from ..parsers.sniff import detect_file, header_signature
 from ..pipeline.transfers import unpair
+from ..reconcile import adopt, mirror_size, reconcile_import, refresh_mirror, reject_match
+from ..models import ActualMirror
 from ..splits import SplitDraft, parse_split_amount, replace_splits, serialize_splits, validate_splits
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -83,6 +85,19 @@ def _render_import_detail(
     for cat in categories:
         categories_by_group.setdefault(cat["group_name"], []).append(cat)
 
+    # Reconciliación: candidatos legacy de las filas con match pendiente.
+    candidates = {
+        t.id: db.get(ActualMirror, t.match_candidate_id)
+        for t in txns if t.match_candidate_id and t.actual_txn_id is None
+    }
+    recon = {
+        "mirror_rows": mirror_size(db),
+        "tier2": [t for t in txns if t.match_tier == 2 and t.id in candidates],
+        "tier3": [t for t in txns if t.match_tier == 3 and t.id in candidates],
+        "adopted": sum(1 for t in txns if t.sync_origin == "adopted"),
+        "candidates": candidates,
+    }
+
     return templates.TemplateResponse(
         request=request,
         name="import_detail.html",
@@ -95,6 +110,7 @@ def _render_import_detail(
             "split_errors": split_errors or {},
             "split_drafts": drafts,
             "categories_by_group": categories_by_group,
+            "recon": recon,
         },
     )
 
@@ -596,6 +612,52 @@ async def save_import(import_id: str, request: Request, db: Session = Depends(ge
         return _render_import_detail(import_id, request, db, split_errors=split_errors, split_drafts=split_drafts)
     db.commit()
     return RedirectResponse(f"/imports/{import_id}", status_code=303)
+
+
+# ── Reconciliación contra Actual (data histórica/legacy) ────────────────────
+@app.post("/imports/{import_id}/reconcile")
+def reconcile_endpoint(import_id: str, refresh: str = Form(""), db: Session = Depends(get_db)):
+    """Matchea el import contra el espejo. refresh=on re-descarga el espejo primero."""
+    if refresh == "on" or mirror_size(db) == 0:
+        refresh_mirror(db)
+    reconcile_import(db, import_id, apply=True)
+    return RedirectResponse(f"/imports/{import_id}?detected=Reconciliado contra Actual", status_code=303)
+
+
+@app.post("/imports/{import_id}/adopt-all")
+def adopt_all(import_id: str, db: Session = Depends(get_db)):
+    """Adopta todas las nivel 2 (fecha+monto exacto o payee casi idéntico)."""
+    txns = db.scalars(
+        select(Transaction).where(
+            Transaction.import_id == import_id,
+            Transaction.match_tier == 2,
+            Transaction.match_candidate_id.isnot(None),
+            Transaction.actual_txn_id.is_(None),
+        )
+    ).all()
+    for t in txns:
+        adopt(db, t)
+    db.commit()
+    return RedirectResponse(
+        f"/imports/{import_id}?detected=Adoptadas {len(txns)} transacciones ya existentes en Actual",
+        status_code=303,
+    )
+
+
+@app.post("/txns/{txn_id}/adopt")
+def adopt_one(txn_id: str, db: Session = Depends(get_db)):
+    t = db.get(Transaction, txn_id)
+    adopt(db, t)
+    db.commit()
+    return RedirectResponse(f"/imports/{t.import_id}", status_code=303)
+
+
+@app.post("/txns/{txn_id}/reject-match")
+def reject_one(txn_id: str, db: Session = Depends(get_db)):
+    t = db.get(Transaction, txn_id)
+    reject_match(db, t)
+    db.commit()
+    return RedirectResponse(f"/imports/{t.import_id}", status_code=303)
 
 
 @app.post("/imports/{import_id}/approve")

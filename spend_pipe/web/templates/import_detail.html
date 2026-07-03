@@ -300,6 +300,53 @@
 </div>
 {% endif %}
 
+<!-- Reconciliación contra Actual: historia legacy que ya existe allá -->
+<div class="card" style="border-left:4px solid var(--warn)">
+  <h3 style="margin-top:0">Reconciliación contra Actual</h3>
+  <p class="muted" style="font-size:13px">
+    Espejo local: <b>{{ recon.mirror_rows }}</b> transacciones de Actual ·
+    adoptadas en este import: <b>{{ recon.adopted }}</b>
+    {% if recon.tier2 %} · <span class="pill s-normalized">{{ recon.tier2|length }} adoptables</span>{% endif %}
+    {% if recon.tier3 %} · <span class="pill s-needs_review">{{ recon.tier3|length }} dudosas</span>{% endif %}
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+    <form action="/imports/{{ imp.id }}/reconcile" method="post" style="display:flex; gap:8px; align-items:center">
+      <label style="display:flex; gap:6px; align-items:center; margin:0; font-size:12px; color:var(--muted)">
+        <input type="checkbox" name="refresh" checked> refrescar espejo (lento, ~30s)
+      </label>
+      <button type="submit" class="secondary">Reconciliar</button>
+    </form>
+    {% if recon.tier2 %}
+    <form action="/imports/{{ imp.id }}/adopt-all" method="post"
+          onsubmit="return confirm('Adoptar {{ recon.tier2|length }} transacciones que ya existen en Actual (no se re-insertan; la categoría legacy se conserva)?')">
+      <button type="submit">Adoptar {{ recon.tier2|length }} existentes</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if recon.tier3 %}
+  <h4 style="margin:14px 0 6px">Matches dudosos (fecha corrida, payee distinto) — decide tú</h4>
+  <table>
+    <thead><tr><th>Archivo</th><th class="num">Monto</th><th>↔ Candidato en Actual</th><th>Cat. legacy</th><th></th></tr></thead>
+    <tbody>
+      {% for t in recon.tier3 %}
+      {% set c = recon.candidates[t.id] %}
+      <tr>
+        <td class="muted">{{ t.date }} · {{ t.raw_payee[:32] }}</td>
+        <td class="num">{{ '%.2f'|format(t.amount) }} {{ t.currency }}</td>
+        <td class="muted">{{ c.date }} · {{ (c.payee_name or '')[:32] }}</td>
+        <td class="muted">{{ c.category_name or '—' }}</td>
+        <td style="white-space:nowrap">
+          <form action="/txns/{{ t.id }}/adopt" method="post" style="display:inline"><button type="submit" class="secondary" style="padding:3px 10px">Es la misma</button></form>
+          <form action="/txns/{{ t.id }}/reject-match" method="post" style="display:inline"><button type="submit" class="secondary" style="padding:3px 10px">Es nueva</button></form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
 <h2>{{ imp.source_bank }} <span class="muted" style="font-size:16px;">· {{ imp.source_file }}</span></h2>
 
 <!-- Keyboard Navigation Guide -->
