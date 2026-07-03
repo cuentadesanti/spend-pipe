@@ -389,7 +389,7 @@
         onsubmit="return confirm('¿Eliminar este import completo del staging?\n\nNada se borra de Actual (solo lo no-pusheado se puede eliminar). Podrás volver a subir el archivo correcto.')">
     <button type="submit" class="secondary"
             style="background:rgba(224,92,92,0.12); color:var(--bad); border:1px solid rgba(224,92,92,0.3); padding:6px 12px; font-size:12.5px;">
-      🗑 Eliminar import
+      Eliminar import
     </button>
   </form>
 </div>
@@ -426,7 +426,7 @@
     <form action="/imports/{{ imp.id }}/ai-categorize" method="post"
           onsubmit="return showBusy('Auto-clasificando…', 'Categorizando las filas sin regla en lotes. Esto puede tardar un minuto.')">
       <button type="submit" class="secondary" {{ '' if ai_enabled else 'disabled title="Configura tu API key de Anthropic en el inicio"' }}>
-        ✨ Auto-classify
+        Auto-classify
       </button>
     </form>
   </div>
@@ -537,7 +537,7 @@
                 {% endfor %}
               </select>
               {% if t.category and t.confidence is not none and t.confidence < 1.0 %}
-              <span class="auto-pill" title="Categoría llenada automáticamente">✨ auto</span>
+              <span class="auto-pill" title="Categoría llenada automáticamente">auto</span>
               {% endif %}
             </td>
             <td class="num {{ 'neg' if t.amount < 0 else '' }}" style="font-weight:600;">{{ '%.2f'|format(t.amount) }}
@@ -633,7 +633,7 @@
               </select>
             </div>
             {% if t.category and t.confidence is not none and t.confidence < 1.0 %}
-            <span class="auto-pill" title="Categoría llenada automáticamente — confírmala o cámbiala">✨ auto</span>
+            <span class="auto-pill" title="Categoría llenada automáticamente — confírmala o cámbiala">auto</span>
             {% endif %}
             {% if drafts %}
             <div class="muted" style="font-size:11px; font-weight:600; padding:4px 0;">La categoría vive en los splits.
@@ -733,7 +733,7 @@
         {% if ns.needs_review_count == 0 %}
         <tr>
           <td colspan="8" style="text-align:center; padding: 40px; color: var(--muted); font-size: 15px;">
-            🎉 ¡Bandeja de excepciones limpia! No quedan transacciones que requieran revisión manual.
+            ¡Bandeja de excepciones limpia! No quedan transacciones que requieran revisión manual.
           </td>
         </tr>
         {% endif %}
