@@ -23,11 +23,13 @@ archivo real; con payee casi idéntico tipo 'Apple pay: UBER *TRIP' ↔ 'Uber *T
 es la misma transacción, no hace falta humano).
 
 Adopción = en vez de re-insertar: staging queda synced con el actual_txn_id legacy
-(sync_origin='adopted'), y se hace backfill de nuestro imported_id a la transacción
-legacy en Actual (claim_transactions.js) para que la próxima pasada la atrape el
-nivel 1 — el matching difuso se paga UNA vez por transacción histórica y el sistema
-converge a id-based. La categoría legacy GANA (la puso un humano); la de spend-pipe
-queda solo como sugerencia en el review.
+(sync_origin='adopted'). El claim vive ENTERAMENTE en spend-pipe: verificado contra
+Actual real (2026-07-03) que la API no permite re-escribir imported_id de una txn
+existente (updateTransaction lo ignora, financial_id también, y el merge fuzzy de
+importTransactions solo reclama txns sin id — con id distinto crea duplicado). La
+convergencia es por actual_txn_id: una fila del espejo ya adoptada por staging queda
+excluida de futuros matchings. La categoría legacy GANA (la puso un humano); la de
+spend-pipe queda solo como sugerencia en el review.
 """
 from __future__ import annotations
 
@@ -151,6 +153,15 @@ def reconcile_import(session: Session, import_id: str, apply: bool = False) -> R
     report = ReconcileReport()
     claimed: set[str] = set()   # mirror ids reclamados en esta pasada
 
+    # Filas de Actual ya adoptadas/vinculadas por CUALQUIER fila de staging: fuera
+    # de los candidatos (la convergencia id-based vive acá, no en Actual — su API
+    # no permite backfillear imported_id sobre txns existentes).
+    already_linked = set(
+        session.scalars(
+            select(Transaction.actual_txn_id).where(Transaction.actual_txn_id.isnot(None))
+        ).all()
+    )
+
     for t in txns:
         dest = actual_account_name(t.source_account)
         cents = amount_to_cents(t.amount)
@@ -179,6 +190,7 @@ def reconcile_import(session: Session, import_id: str, apply: bool = False) -> R
         candidates = [
             c for c in candidates
             if c.id not in claimed
+            and c.actual_txn_id not in already_linked
             and not (c.imported_id or "").startswith("spendpipe:")
         ]
 
@@ -269,17 +281,7 @@ def reject_match(session: Session, txn: Transaction) -> None:
         txn.status = TxnStatus.normalized
 
 
-def claim_in_actual(pairs: list[tuple[str, str]], timeout: int = 180) -> str:
-    """Backfill de imported_id en Actual para transacciones adoptadas.
-
-    pairs = [(actual_txn_id, imported_id), ...]. Corre claim_transactions.js.
-    Tras esto, la próxima reconciliación las atrapa por nivel 1 (id exacto).
-    """
-    payload = json.dumps([{"actual_txn_id": a, "imported_id": i} for a, i in pairs])
-    proc = subprocess.run(
-        ["node", "claim_transactions.js"],
-        cwd=str(NODE_PUSHER), input=payload, capture_output=True, text=True, timeout=timeout,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"claim_transactions.js falló: {proc.stderr[-500:]}")
-    return proc.stderr[-2000:]   # log humano del script
+# NOTA: no existe backfill de imported_id hacia Actual — verificado 2026-07-03 que
+# la API lo ignora en updateTransaction (también como financial_id) y el merge de
+# importTransactions solo reclama txns SIN id. El claim durable es `already_linked`
+# (actual_txn_id en staging) dentro de reconcile_import().
