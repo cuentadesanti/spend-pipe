@@ -536,7 +536,9 @@ def import_detail(import_id: str, request: Request, db: Session = Depends(get_db
 
 @app.post("/imports/{import_id}/save")
 async def save_import(import_id: str, request: Request, db: Session = Depends(get_db)):
-    form = await request.form()
+    # max_fields: el form del review manda ~5 campos por fila; con 350+ filas se
+    # pasa del default de 1000 de Starlette (400 'Too many fields').
+    form = await request.form(max_fields=50000, max_files=100)
     txns = _import_txns(db, import_id)
     split_errors, split_drafts = _apply_review_form(db, txns, form)
     if split_errors:
@@ -637,7 +639,9 @@ def reject_one(txn_id: str, db: Session = Depends(get_db)):
 
 @app.post("/imports/{import_id}/approve")
 async def approve_import(import_id: str, request: Request, db: Session = Depends(get_db)):
-    form = await request.form()
+    # max_fields: el form del review manda ~5 campos por fila; con 350+ filas se
+    # pasa del default de 1000 de Starlette (400 'Too many fields').
+    form = await request.form(max_fields=50000, max_files=100)
     txns_all = _import_txns(db, import_id)
     split_errors, split_drafts = _apply_review_form(db, txns_all, form)
     if split_errors:
