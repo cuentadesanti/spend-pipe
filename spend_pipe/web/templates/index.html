@@ -476,6 +476,31 @@
   </div>
 </div>
 
+<!-- Ajustes: Asistente de IA -->
+<div class="card" style="margin-top:24px; border-left:4px solid var(--accent); max-width:680px;">
+  <div class="section-label" style="margin-bottom:10px">Asistente de IA (categorización)</div>
+  <p class="muted" style="font-size:13px; margin-top:0">
+    {% if ai_enabled %}
+    <span class="pill s-normalized">activo</span> · key <code>{{ ai_key_masked }}</code> · modelo <code>{{ ai_model }}</code>
+    {% else %}
+    <span class="pill s-needs_review">sin configurar</span> — pega tu API key de Anthropic
+    (<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent)">consola</a>)
+    para pre-llenar categorías en las filas que las reglas no reconocen.
+    {% endif %}
+  </p>
+  <form action="/settings/ai" method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+    <input type="password" name="api_key" placeholder="{{ 'sk-ant-… (dejar vacío para no cambiar)' if ai_enabled else 'sk-ant-…' }}"
+           autocomplete="off" style="flex:1; min-width:260px; background:#11131a; border:1px solid var(--line); border-radius:6px; padding:8px 10px; color:var(--fg);">
+    <select name="model" style="background:#11131a; border:1px solid var(--line); border-radius:6px; padding:8px 10px; color:var(--fg);">
+      <option value="claude-haiku-4-5" {{ 'selected' if ai_model=='claude-haiku-4-5' else '' }}>Haiku 4.5 (rápido y barato)</option>
+      <option value="claude-sonnet-5" {{ 'selected' if ai_model=='claude-sonnet-5' else '' }}>Sonnet 5 (equilibrado)</option>
+      <option value="claude-opus-4-8" {{ 'selected' if ai_model=='claude-opus-4-8' else '' }}>Opus 4.8 (máxima calidad)</option>
+    </select>
+    <button type="submit" class="secondary">Guardar</button>
+  </form>
+  <p class="muted" style="font-size:11px; margin-bottom:0">La key se guarda en tu base de datos (no en el código) y solo se usa desde el servidor.</p>
+</div>
+
 <script>
   const dropzoneOverlay = document.getElementById('dropzone-overlay');
   const globalInput = document.getElementById('global-drag-input');

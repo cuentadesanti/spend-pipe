@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     actual_password: str = ""
     actual_sync_id: str = ""
 
+    # IA (opcional): sin key, los fallbacks de IA se desactivan y el pipeline
+    # sigue 100% funcional. Modelo elegido por costo (diseño ai-assist-design.md);
+    # subible a claude-opus-4-8 vía env si se quiere más calidad.
+    anthropic_key: str = ""          # SPENDPIPE_ANTHROPIC_KEY
+    ai_model: str = "claude-haiku-4-5"
+
     @property
     def sqlalchemy_database_url(self) -> str:
         return _normalize_database_url(self.database_url)

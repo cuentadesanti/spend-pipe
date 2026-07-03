@@ -68,6 +68,20 @@ class BatchStatus(str, enum.Enum):
     pushed = "pushed"
 
 
+class AppSetting(Base):
+    """Ajustes de la app editables desde la UI (ej. la API key de Anthropic).
+
+    Viven en la base (no en .env) para sobrevivir redeploys con filesystem
+    efímero (Railway). Los valores sensibles se muestran enmascarados en la UI.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class CsvMapping(Base):
     """Mapeo de columnas 'aprendido' para un layout CSV: la firma del header lo
     reconoce en futuros uploads y el archivo entra solo, sin re-mapear."""

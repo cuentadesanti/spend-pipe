@@ -322,6 +322,11 @@
       <button type="submit">Adoptar {{ recon.tier2|length }} existentes</button>
     </form>
     {% endif %}
+    <form action="/imports/{{ imp.id }}/ai-categorize" method="post">
+      <button type="submit" class="secondary" {{ '' if ai_enabled else 'disabled title="Configura tu API key de Anthropic en el inicio"' }}>
+        ✨ Sugerir categorías con IA
+      </button>
+    </form>
   </div>
 
   {% if recon.tier3 %}

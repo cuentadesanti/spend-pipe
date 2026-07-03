@@ -30,6 +30,7 @@ from ..parsers.sniff import detect_file, header_signature
 from ..pipeline.transfers import unpair
 from ..reconcile import adopt, mirror_size, reconcile_import, refresh_mirror, reject_match
 from ..models import ActualMirror
+from .. import ai
 from ..splits import SplitDraft, parse_split_amount, replace_splits, serialize_splits, validate_splits
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -115,6 +116,7 @@ def _render_import_detail(
             "split_drafts": drafts,
             "categories_by_group": categories_by_group,
             "recon": recon,
+            "ai_enabled": ai.is_enabled(db),
         },
     )
 
@@ -392,6 +394,9 @@ def index(request: Request, month: str = None, db: Session = Depends(get_db)):
             "current_month_label": current_month_label,
             "prev_month_str": prev_month_str,
             "next_month_str": next_month_str,
+            "ai_enabled": ai.is_enabled(db),
+            "ai_key_masked": ai.mask_key(ai.get_api_key(db)),
+            "ai_model": ai.get_model(db),
         },
     )
 
@@ -524,6 +529,50 @@ async def save_import(import_id: str, request: Request, db: Session = Depends(ge
         return _render_import_detail(import_id, request, db, split_errors=split_errors, split_drafts=split_drafts)
     db.commit()
     return RedirectResponse(f"/imports/{import_id}", status_code=303)
+
+
+# ── Ajustes (API key de IA desde la UI; persiste en la base) ────────────────
+@app.post("/settings/ai")
+def save_ai_settings(
+    api_key: str = Form(""),
+    model: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    # Solo se sobreescribe si el usuario escribió algo (el campo vacío no borra).
+    if api_key.strip():
+        ai.set_api_key(db, api_key)
+    if model.strip():
+        ai.set_model(db, model)
+    db.commit()
+    return RedirectResponse("/", status_code=303)
+
+
+# ── IA: sugerir categorías para filas sin regla ──────────────────────────────
+@app.post("/imports/{import_id}/ai-categorize")
+def ai_categorize(import_id: str, db: Session = Depends(get_db)):
+    if not ai.is_enabled(db):
+        return RedirectResponse(
+            f"/imports/{import_id}?detected=Configura tu API key de Anthropic en el inicio para usar la IA",
+            status_code=303,
+        )
+    txns = db.scalars(
+        select(Transaction).where(
+            Transaction.import_id == import_id,
+            Transaction.category.is_(None),
+            Transaction.is_transfer.is_(False),
+            Transaction.is_duplicate.is_(False),
+            Transaction.actual_txn_id.is_(None),
+        )
+    ).all()
+    categories = [c["full_name"] for c in get_actual_categories() if c.get("full_name")]
+    try:
+        suggestions = ai.suggest_categories(list(txns), categories, session=db)
+        applied = ai.apply_suggestions(list(txns), suggestions)
+        db.commit()
+        msg = f"IA sugirió categoría para {applied} de {len(txns)} filas sin regla (confidence {ai.AI_CONFIDENCE}; confirma en el triage)"
+    except Exception as e:  # noqa: BLE001
+        msg = f"Error consultando la IA: {str(e)[:120]}"
+    return RedirectResponse(f"/imports/{import_id}?detected={msg}", status_code=303)
 
 
 # ── Reconciliación contra Actual (data histórica/legacy) ────────────────────
