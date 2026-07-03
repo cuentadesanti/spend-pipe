@@ -164,28 +164,57 @@ def _apply_review_form(
 
 
 _CATEGORIES_CACHE: list[dict] = []
+CATEGORIES_CACHE_FILE = BASE_DIR / ".categories_cache.json"
 
 def get_actual_categories() -> list[dict]:
+    import time
     global _CATEGORIES_CACHE
     if _CATEGORIES_CACHE:
         return _CATEGORIES_CACHE
+
+    if CATEGORIES_CACHE_FILE.exists():
+        try:
+            mtime = CATEGORIES_CACHE_FILE.stat().st_mtime
+            if time.time() - mtime < 14400:  # 4 hours TTL
+                data = json.loads(CATEGORIES_CACHE_FILE.read_text(encoding="utf-8"))
+                if data:
+                    _CATEGORIES_CACHE = data
+                    return _CATEGORIES_CACHE
+        except Exception as e:
+            print(f"Error reading categories cache file: {e}")
+
     try:
         proc = subprocess.run(
             ["node", "get_categories.js"],
             cwd=str(NODE_PUSHER),
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=12,
         )
         if proc.returncode == 0:
             lines = proc.stdout.splitlines()
             json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
             if json_line:
-                _CATEGORIES_CACHE = json.loads(json_line[0])
-                return _CATEGORIES_CACHE
+                data = json.loads(json_line[0])
+                if data:
+                    try:
+                        CATEGORIES_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
+                    except Exception as we:
+                        print(f"Error writing categories cache file: {we}")
+                    _CATEGORIES_CACHE = data
+                    return _CATEGORIES_CACHE
     except Exception as e:
         print(f"Error fetching actual categories: {e}")
-        
+
+    if CATEGORIES_CACHE_FILE.exists():
+        try:
+            data = json.loads(CATEGORIES_CACHE_FILE.read_text(encoding="utf-8"))
+            if data:
+                _CATEGORIES_CACHE = data
+                return _CATEGORIES_CACHE
+        except Exception:
+            pass
+
     return [
         {"name": "Comida fuera", "group_name": "Gastos variables"},
         {"name": "Suscripciones", "group_name": "Gastos fijos"},
@@ -197,28 +226,57 @@ def get_actual_categories() -> list[dict]:
 
 
 _ACCOUNTS_CACHE: list[dict] = []
+ACCOUNTS_CACHE_FILE = BASE_DIR / ".accounts_cache.json"
 
 def get_actual_accounts() -> list[dict]:
+    import time
     global _ACCOUNTS_CACHE
     if _ACCOUNTS_CACHE:
         return _ACCOUNTS_CACHE
+
+    if ACCOUNTS_CACHE_FILE.exists():
+        try:
+            mtime = ACCOUNTS_CACHE_FILE.stat().st_mtime
+            if time.time() - mtime < 14400:  # 4 hours TTL
+                data = json.loads(ACCOUNTS_CACHE_FILE.read_text(encoding="utf-8"))
+                if data:
+                    _ACCOUNTS_CACHE = data
+                    return _ACCOUNTS_CACHE
+        except Exception as e:
+            print(f"Error reading accounts cache file: {e}")
+
     try:
         proc = subprocess.run(
             ["node", "get_accounts.js"],
             cwd=str(NODE_PUSHER),
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=12,
         )
         if proc.returncode == 0:
             lines = proc.stdout.splitlines()
             json_line = [l.strip() for l in lines if l.strip().startswith("[") and l.strip().endswith("]")]
             if json_line:
-                _ACCOUNTS_CACHE = json.loads(json_line[0])
-                return _ACCOUNTS_CACHE
+                data = json.loads(json_line[0])
+                if data:
+                    try:
+                        ACCOUNTS_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
+                    except Exception as we:
+                        print(f"Error writing accounts cache file: {we}")
+                    _ACCOUNTS_CACHE = data
+                    return _ACCOUNTS_CACHE
     except Exception as e:
         print(f"Error fetching actual accounts: {e}")
-        
+
+    if ACCOUNTS_CACHE_FILE.exists():
+        try:
+            data = json.loads(ACCOUNTS_CACHE_FILE.read_text(encoding="utf-8"))
+            if data:
+                _ACCOUNTS_CACHE = data
+                return _ACCOUNTS_CACHE
+        except Exception:
+            pass
+
     return [
         {"name": "BBVA Cuenta Digital (MXN)"},
         {"name": "BBVA TDC"},

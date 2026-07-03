@@ -12,3 +12,5 @@ node_modules
 inbox
 artifacts
 .actual-cache
+.categories_cache.json
+.accounts_cache.json
