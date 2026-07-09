@@ -26,13 +26,16 @@ from .schema import (
 #   - CRÉDITO → cuenta separada en Actual; el pago mensual se concilia como transferencia.
 #   - DÉBITO  → carga directa contra 'Openbank Nómina' (cuenta ...8579), sin cuenta aparte.
 # Openbank es DÉBITO: las compras cargan directo contra 'Openbank Nómina' (...8579).
-# NO importar además el extracto de Nómina o se duplican estos mismos cargos.
-# El source_account 'Openbank Tarjeta' se mantiene estable (es parte del imported_id);
+# Tarjeta y cuenta rutean a la MISMA cuenta destino: así el dedup_hash (que usa la
+# cuenta destino) hace chocar entre sí los cargos que llegan por ambas fuentes, y la
+# reconciliación adopta lo que ya exista en Actual.
+# Los source_account se mantienen estables (son parte del imported_id);
 # solo cambia el ruteo hacia Actual.
 # OJO: en Actual las cuentas EUR/MXN llevan el sufijo de moneda en el nombre
 # (ej. "Openbank Nómina (EUR)"). El nombre debe coincidir EXACTO.
 ACCOUNT_MAP: dict[str, str] = {
-    "Openbank Tarjeta": "Openbank Nómina (EUR)",   # débito → carga directa a Nómina (off-budget)
+    "Openbank Tarjeta": "Openbank Nómina (EUR)",   # débito → carga directa a Nómina
+    "Openbank Cuenta": "Openbank Nómina (EUR)",    # extracto de la misma cuenta ...8579
     "BBVA Cuenta Digital": "BBVA Cuenta Digital (MXN)",   # el nombre en Actual lleva sufijo (MXN)
 }
 

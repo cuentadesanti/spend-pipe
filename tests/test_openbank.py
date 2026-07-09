@@ -64,6 +64,82 @@ def test_situacion_sets_pending():
     assert txns[2].pending is False   # LIQUIDADO
 
 
+# ── Extracto de cuenta ('Cuentas - Movimientos') ─────────────────────────────
+# Estructura real: 10 celdas por fila, datos en índices impares (1,3,5,7,9).
+def _acc_row(fecha_op, fecha_valor, concepto, importe, saldo):
+    cells = ["", fecha_op, "", fecha_valor, "", concepto, "", importe, "", saldo]
+    return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+def _acc_html(rows, saldo_header="80,05 EUR"):
+    return (
+        "<html><body><table>"
+        "<tr><td></td><td>Cuentas - Movimientos</td></tr>"
+        f"<tr><td></td><td>Saldo:</td><td></td><td>{saldo_header}</td></tr>"
+        "<tr><td></td><td>Lista de Movimientos</td></tr>"
+        "<tr><td></td><td>Fecha Operación</td><td></td><td>Fecha Valor</td><td></td>"
+        "<td>Concepto</td><td></td><td>Importe</td><td></td><td>Saldo</td></tr>"
+        + "".join(rows) + "</table></body></html>"
+    )
+
+# Más reciente primero, como lo exporta Openbank. Saldo corrido consistente.
+ACC_ROWS = [
+    _acc_row("08/07/2026", "07/07/2026", "COMISION POR COMPRAS REALIZADAS EN MONEDA NO EURO", "-0,35", "80,05"),
+    _acc_row("07/07/2026", "07/07/2026", "TRANSFERENCIA INMEDIATA DE ACME SL CONCEPTO Nomina", "2.307,10", "80,40"),
+    _acc_row("06/07/2026", "06/07/2026", "Apple pay: COMPRA EN UBER *EATS, CON LA TARJETA : 5489", "-11,86", "-2.226,70"),
+]
+
+
+def test_openbank_account_parser_registered():
+    p = get_parser("openbank-cuenta", "xls")
+    assert p.format == "xls"
+
+
+def test_openbank_account_parse(tmp_path):
+    from spend_pipe.parsers.openbank import OpenbankAccountParser
+
+    f = tmp_path / "Movimientos de Cuenta.xls"
+    f.write_text(_acc_html(ACC_ROWS), encoding="utf-8")
+    txns = OpenbankAccountParser("openbank-cuenta", "Openbank Cuenta", "EUR").parse(str(f))
+
+    assert len(txns) == 3
+    assert txns[0].date == date(2026, 7, 8)
+    assert txns[0].amount == Decimal("-0.35")
+    assert txns[0].notes == "valor 07/07/2026"     # fecha valor distinta → nota
+    assert txns[0].pending is False
+    assert txns[1].amount == Decimal("2307.10")    # miles con punto
+    assert txns[1].notes is None                   # misma fecha valor → sin nota
+    assert txns[2].raw_payee.startswith("Apple pay: COMPRA EN UBER")
+    assert all(t.currency == "EUR" for t in txns)
+
+
+def test_openbank_account_balance_chain_lock(tmp_path):
+    import pytest
+    from spend_pipe.parsers.errors import ParseValidationError
+    from spend_pipe.parsers.openbank import OpenbankAccountParser
+
+    # Saldo corrido roto (fila intermedia perdida/deformada) → fallar fuerte.
+    rows = [
+        _acc_row("08/07/2026", "08/07/2026", "COMISION", "-0,35", "80,05"),
+        _acc_row("07/07/2026", "07/07/2026", "NOMINA", "2.307,10", "99,99"),  # 99,99 + -0,35 != 80,05
+    ]
+    f = tmp_path / "mov.xls"
+    f.write_text(_acc_html(rows), encoding="utf-8")
+    with pytest.raises(ParseValidationError, match="no encadena"):
+        OpenbankAccountParser("openbank-cuenta", "Openbank Cuenta", "EUR").parse(str(f))
+
+
+def test_openbank_account_header_saldo_lock(tmp_path):
+    import pytest
+    from spend_pipe.parsers.errors import ParseValidationError
+    from spend_pipe.parsers.openbank import OpenbankAccountParser
+
+    # El saldo del encabezado no coincide con la primera fila → fallar fuerte.
+    f = tmp_path / "mov.xls"
+    f.write_text(_acc_html(ACC_ROWS, saldo_header="999,99 EUR"), encoding="utf-8")
+    with pytest.raises(ParseValidationError, match="encabezado"):
+        OpenbankAccountParser("openbank-cuenta", "Openbank Cuenta", "EUR").parse(str(f))
+
+
 def test_pending_forces_needs_review():
     from datetime import date
     from spend_pipe.models import Transaction, TxnStatus

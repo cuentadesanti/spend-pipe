@@ -9,7 +9,7 @@ from __future__ import annotations
 from .bbva_pdf import BbvaPdfParser
 from .bbva_tdc_pdf import BbvaTdcPdfParser
 from .csv_generic import CsvColumnMap, GenericCsvParser
-from .openbank import OpenbankCardParser
+from .openbank import OpenbankAccountParser, OpenbankCardParser
 from .registry import register
 
 # BBVA Tarjeta de Crédito — export CSV con columnas Date, Payee, Memo, Amount (fecha ISO).
@@ -48,6 +48,18 @@ register(
     OpenbankCardParser(
         source_bank="openbank-tdc",
         source_account="Openbank Tarjeta",
+        currency="EUR",
+    )
+)
+
+# Openbank 'Cuentas - Movimientos' — extracto de la cuenta corriente, mismo formato
+# HTML-en-.xls. Cubre lo que la tarjeta no ve (nóminas, Bizum, transferencias,
+# comisiones) y también los cargos de tarjeta con fecha de liquidación; el solape
+# con la tarjeta y con lo legacy lo resuelve la reconciliación (tiers + adopción).
+register(
+    OpenbankAccountParser(
+        source_bank="openbank-cuenta",
+        source_account="Openbank Cuenta",
         currency="EUR",
     )
 )

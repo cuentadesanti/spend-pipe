@@ -68,6 +68,18 @@ def test_html_openbank_card_detected():
     assert d.parser_available is True
 
 
+def test_html_openbank_account_detected_not_confused_with_card():
+    # El extracto de cuenta también dice 'TARJETA' en los conceptos (Apple Pay);
+    # debe detectarse como cuenta, no como tarjeta.
+    d = detect_html_text(
+        "<td>Cuentas - Movimientos</td><td>Lista de Movimientos</td>"
+        "<td>Apple pay: COMPRA EN UBER, CON LA TARJETA : 5489</td>"
+    )
+    assert d.source_bank == "openbank-cuenta"
+    assert d.format == "xls"
+    assert d.parser_available is True
+
+
 # ── CSV ──────────────────────────────────────────────────────────────────────
 def test_csv_bbva_tdc_exact_match():
     d = detect_csv_text("Date,Payee,Memo,Amount\n2026-05-05,AT T CR,, -532.00\n")

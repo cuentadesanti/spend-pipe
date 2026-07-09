@@ -112,6 +112,14 @@ def detect_pdf_text(text: str) -> Detection:
 # ── Fingerprint de HTML (el '.xls' de Openbank y similares) ────────────────
 def detect_html_text(text: str) -> Detection:
     t = " ".join(text.split())
+    # Cuenta ANTES que tarjeta: el extracto de cuenta también dice 'Tarjeta' en los
+    # conceptos (compras Apple Pay), así que el check de tarjeta solo no alcanza.
+    if "Cuentas - Movimientos" in t:
+        return Detection(
+            kind="html", source_bank="openbank-cuenta", format="xls",
+            source_account="Openbank Cuenta", parser_available=True, confidence="high",
+            label="Openbank — Movimientos de Cuenta (.xls/HTML)",
+        )
     if "Tarjetas - Movimientos" in t or ("Lista de Movimientos" in t and "Tarjeta" in t):
         return Detection(
             kind="html", source_bank="openbank-tdc", format="xls",
