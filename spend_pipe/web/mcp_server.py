@@ -14,7 +14,9 @@ Reglas de diseño:
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
+import subprocess
 import urllib.request
 from datetime import date as Date
 from pathlib import Path
@@ -30,17 +32,22 @@ from ..ingest import ingest_file
 from ..models import ActualMirror, Import, Transaction, TxnStatus
 from ..parsers.sniff import detect_file
 from ..reconcile import adopt, mirror_size, reconcile_import, refresh_mirror
-from .actions import approve_import_core, delete_import_core, push_batch_core
+from .actions import NODE_PUSHER, approve_import_core, delete_import_core, push_batch_core
 
 mcp = FastMCP(
     "spend-pipe",
     instructions=(
-        "Pipeline de ingesta financiera de Santiago hacia Actual Budget. "
-        "Flujo típico de un archivo: ingerir_desde_url → detalle_import → "
-        "reconciliar → adoptar_existentes → clasificar_pendientes → "
+        "Pipeline de ingesta financiera de Santiago hacia Actual Budget, más "
+        "operaciones directas sobre Actual. ANTES de ingerir un archivo, revisa "
+        "con listar_imports si ya está (evita duplicados). Flujo de un archivo "
+        "nuevo: ingerir_desde_url → reconciliar → adoptar_existentes → "
+        "clasificar_pendientes → detalle_import → confirmar_revision → "
         "aprobar_y_pushear(confirmar=true). Consultas de gasto/saldos: "
-        "estado_cuentas, buscar_transacciones, resumen_por_categoria "
-        "(usan el espejo local; refrescar_espejo si está viejo)."
+        "estado_cuentas, buscar_transacciones, resumen_por_categoria usan el "
+        "espejo local (refrescar_espejo si está viejo); saldos_actual consulta "
+        "Actual en vivo. Escritura directa en Actual: crear_transaccion, "
+        "ajustar_saldo, actualizar_transaccion, eliminar_transaccion — todas "
+        "con dry-run por default y confirmar=true explícito."
     ),
     stateless_http=True,
     json_response=True,
@@ -123,6 +130,8 @@ def buscar_transacciones(
                 "fecha": str(m.date), "monto": m.amount_cents / 100,
                 "payee": m.payee_name, "categoria": m.category_name,
                 "cuenta": m.account_name,
+                # id de Actual: sirve para actualizar_transaccion / eliminar_transaccion
+                "actual_txn_id": m.actual_txn_id,
             }
             for m in rows
         ]
@@ -325,6 +334,125 @@ def confirmar_revision(txn_ids: list[str], categoria: str = "") -> dict:
             n += 1
         db.commit()
         return {"confirmadas": n}
+
+
+# ── Operaciones directas sobre Actual (node actual_ops.js) ──────────────────
+def _actual_op(cmd: dict, timeout: int = 180) -> dict:
+    proc = subprocess.run(
+        ["node", "actual_ops.js", json.dumps(cmd)],
+        cwd=str(NODE_PUSHER), capture_output=True, text=True, timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"actual_ops falló: {(proc.stderr or '')[-400:]}")
+    line = next((l for l in proc.stdout.splitlines() if l.strip().startswith("{")), None)
+    if line is None:
+        raise RuntimeError("actual_ops no produjo JSON")
+    return json.loads(line)
+
+
+@mcp.tool()
+def saldos_actual() -> dict:
+    """Saldos EN VIVO de todas las cuentas, directo de Actual (tarda ~30-60s;
+    para consultas rápidas usa estado_cuentas, que lee el espejo local)."""
+    return _actual_op({"op": "get_balances"})
+
+
+@mcp.tool()
+def crear_transaccion(
+    cuenta: str,
+    fecha: str,
+    monto: float,
+    payee: str,
+    categoria: str = "",
+    notas: str = "",
+    confirmar: bool = False,
+) -> dict:
+    """Crea una transacción directamente en Actual (fuera del pipeline de imports:
+    para ajustes, saldos iniciales, correcciones). cuenta = nombre EXACTO en Actual,
+    fecha ISO, monto con signo en unidades (ej. -123.45), categoria opcional
+    ('Grupo / Categoría' o solo el nombre). Pide confirmar=true."""
+    if not confirmar:
+        return {
+            "dry_run": {"cuenta": cuenta, "fecha": fecha, "monto": monto,
+                        "payee": payee, "categoria": categoria or None},
+            "nota": "Repite con confirmar=true para escribirla en Actual.",
+        }
+    res = _actual_op({
+        "op": "add_transaction", "account": cuenta, "date": fecha,
+        "amount_cents": round(monto * 100), "payee": payee,
+        "category": categoria or None, "notes": notas or None,
+    })
+    res["nota"] = "El espejo local quedó desactualizado; corre refrescar_espejo para verlo."
+    return res
+
+
+@mcp.tool()
+def ajustar_saldo(
+    cuenta: str,
+    saldo_objetivo: float,
+    fecha: str = "",
+    payee: str = "Ajuste de saldo",
+    confirmar: bool = False,
+) -> dict:
+    """Lleva el saldo de una cuenta de Actual al valor dado creando una transacción
+    de ajuste por la diferencia (snapshots de inversión, saldos iniciales).
+    Consulta el saldo EN VIVO primero. Pide confirmar=true."""
+    saldos = _actual_op({"op": "get_balances"})
+    if cuenta not in saldos:
+        return {"error": f"Cuenta no encontrada: {cuenta}", "cuentas": sorted(saldos)}
+    delta = round(saldo_objetivo - saldos[cuenta], 2)
+    if delta == 0:
+        return {"nota": f"El saldo ya es {saldo_objetivo}; nada que ajustar."}
+    if not confirmar:
+        return {
+            "dry_run": {"cuenta": cuenta, "saldo_actual": saldos[cuenta],
+                        "saldo_objetivo": saldo_objetivo, "ajuste": delta},
+            "nota": "Repite con confirmar=true para crear el ajuste.",
+        }
+    from datetime import date as _date
+
+    res = _actual_op({
+        "op": "add_transaction", "account": cuenta,
+        "date": fecha or _date.today().isoformat(),
+        "amount_cents": round(delta * 100), "payee": payee, "category": None,
+        "notes": f"ajuste a saldo {saldo_objetivo}",
+    })
+    res["ajuste"] = delta
+    return res
+
+
+@mcp.tool()
+def actualizar_transaccion(
+    actual_txn_id: str,
+    categoria: str = "",
+    payee: str = "",
+    notas: str = "",
+    confirmar: bool = False,
+) -> dict:
+    """Edita categoría/payee/notas de una transacción existente en Actual.
+    El actual_txn_id sale de buscar_transacciones. Pide confirmar=true."""
+    if not confirmar:
+        return {
+            "dry_run": {"actual_txn_id": actual_txn_id, "categoria": categoria or None,
+                        "payee": payee or None, "notas": notas or None},
+            "nota": "Repite con confirmar=true para aplicar.",
+        }
+    return _actual_op({
+        "op": "update_transaction", "id": actual_txn_id,
+        "category": categoria or None, "payee": payee or None,
+        "notes": notas or None,
+    })
+
+
+@mcp.tool()
+def eliminar_transaccion(actual_txn_id: str, confirmar: bool = False) -> dict:
+    """Borra una transacción de Actual (el id sale de buscar_transacciones).
+    OJO: si es pata de una transferencia vinculada, la contraparte NO se borra
+    sola. Pide confirmar=true."""
+    if not confirmar:
+        return {"dry_run": {"eliminar": actual_txn_id},
+                "nota": "Repite con confirmar=true para borrarla de Actual."}
+    return _actual_op({"op": "delete_transaction", "id": actual_txn_id})
 
 
 # ── Escritura en Actual (piden confirmar=True) ───────────────────────────────
