@@ -20,6 +20,7 @@ from datetime import date as Date
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import func, select
 
 from .. import ai
@@ -44,6 +45,16 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    # La protección anti-DNS-rebinding valida el header Host contra una allowlist
+    # que por default solo trae localhost → 421 'Invalid Host header' detrás del
+    # proxy de Railway. Se mantiene ACTIVA, con el dominio público en la allowlist.
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=[
+            "spend-pipe-production.up.railway.app",
+            "localhost:*",
+            "127.0.0.1:*",
+        ],
+    ),
 )
 
 
