@@ -91,6 +91,16 @@ def refresh_mirror(session: Session, timeout: int = 180) -> int:
     rows = json.loads(json_line)
 
     # Reemplazo completo: el espejo es un cache derivado, no fuente de verdad.
+    # Antes de borrar hay que soltar las referencias match_candidate_id (FK): las
+    # filas ya resueltas (adoptadas → actual_txn_id) no lo necesitan, y las
+    # pendientes lo recuperan al correr reconcile_import de nuevo tras el refresh.
+    from sqlalchemy import update as _update
+
+    from .models import Transaction as _Txn
+
+    session.execute(
+        _update(_Txn).where(_Txn.match_candidate_id.isnot(None)).values(match_candidate_id=None)
+    )
     session.execute(delete(ActualMirror))
     for r in rows:
         session.add(ActualMirror(
