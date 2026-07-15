@@ -68,7 +68,26 @@ if settings.mcp_secret:
     from .mcp_server import mcp as _mcp
 
     _mcp_stack = AsyncExitStack()
-    app.mount(f"/mcp-{settings.mcp_secret}", _mcp.streamable_http_app())
+    _MCP_PATH = f"/mcp-{settings.mcp_secret}"
+    app.mount(_MCP_PATH, _mcp.streamable_http_app())
+
+    class _McpSlashShim:
+        """El conector de claude.ai le quita la barra final a la URL, y el Mount
+        de Starlette responde al path exacto sin barra con un 307 que ese cliente
+        no sigue ('Couldn't connect'). Reescribimos el path para aceptar ambos."""
+
+        def __init__(self, app, mount_path: str):
+            self.app = app
+            self.mount_path = mount_path
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http" and scope.get("path") == self.mount_path:
+                scope = dict(scope)
+                scope["path"] = self.mount_path + "/"
+                scope["raw_path"] = scope["path"].encode()
+            await self.app(scope, receive, send)
+
+    app.add_middleware(_McpSlashShim, mount_path=_MCP_PATH)
 
     @app.on_event("startup")
     async def _startup_mcp() -> None:
