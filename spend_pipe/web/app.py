@@ -33,6 +33,7 @@ from ..reconcile import adopt, mirror_size, reconcile_import, refresh_mirror, re
 from ..models import ActualMirror
 from .. import ai
 from ..splits import SplitDraft, parse_split_amount, replace_splits, serialize_splits, validate_splits
+from .actions import approve_import_core, delete_import_core, push_batch_core
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ARTIFACTS_DIR = str(settings.resolved_artifacts_dir)
@@ -56,6 +57,26 @@ def _startup() -> None:
     # el fetch tarda 10-60s; la primera request sirve fallback y esto la reemplaza).
     categories_cache.refresh_in_background()
     accounts_cache.refresh_in_background()
+
+
+# ── MCP: el pipeline como tools para claude.ai / ChatGPT ────────────────────
+# Se monta bajo /mcp-<secret> (el path es la autenticación; sin secret, apagado).
+# El session manager del transporte streamable-http necesita su propio lifecycle.
+if settings.mcp_secret:
+    from contextlib import AsyncExitStack
+
+    from .mcp_server import mcp as _mcp
+
+    _mcp_stack = AsyncExitStack()
+    app.mount(f"/mcp-{settings.mcp_secret}", _mcp.streamable_http_app())
+
+    @app.on_event("startup")
+    async def _startup_mcp() -> None:
+        await _mcp_stack.enter_async_context(_mcp.session_manager.run())
+
+    @app.on_event("shutdown")
+    async def _shutdown_mcp() -> None:
+        await _mcp_stack.aclose()
 
 
 def get_db():
@@ -556,34 +577,9 @@ def delete_import(import_id: str, db: Session = Depends(get_db)):
     a ofrecer); al borrar el Import se libera el file-hash → re-subir el archivo
     correcto (o el mismo) vuelve a procesarse desde cero.
     """
-    from sqlalchemy import update
-
-    imp = db.get(Import, import_id)
-    if imp is None:
-        return RedirectResponse("/", status_code=303)
-    txns = db.scalars(select(Transaction).where(Transaction.import_id == import_id)).all()
-
-    pushed = [t for t in txns if t.status == TxnStatus.synced and t.sync_origin == "push"]
-    if pushed:
-        return RedirectResponse(
-            f"/imports/{import_id}?detected=No se puede eliminar: {len(pushed)} filas ya están en Actual (pusheadas)",
-            status_code=303,
-        )
-
-    ids = [t.id for t in txns]
-    # Deshacer pares de transferencia (la pata del otro import queda libre).
-    for t in txns:
-        if t.transfer_pair_id:
-            unpair(db, t)
-    # Limpiar referencias duplicate_of desde filas de OTROS imports.
-    if ids:
-        db.execute(
-            update(Transaction)
-            .where(Transaction.duplicate_of.in_(ids))
-            .values(duplicate_of=None, is_duplicate=False)
-        )
-    db.delete(imp)   # cascade delete-orphan borra sus transacciones (y splits)
-    db.commit()
+    error = delete_import_core(db, import_id)
+    if error and error != "El import no existe":
+        return RedirectResponse(f"/imports/{import_id}?detected={error}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
@@ -689,35 +685,8 @@ async def approve_import(import_id: str, request: Request, db: Session = Depends
 
     # Elegibles: solo lo revisado y listo (normalized o approved) y no duplicado.
     # needs_review (ej. Openbank AUTORIZADO/pendientes) queda fuera hasta revisión explícita.
-    txns = db.scalars(
-        select(Transaction).where(
-            Transaction.import_id == import_id,
-            Transaction.status.in_([TxnStatus.normalized, TxnStatus.approved]),
-            Transaction.is_duplicate.is_(False),
-        )
-    ).all()
+    batch = approve_import_core(db, import_id, approved_by="web")
 
-    batch = Batch(status=BatchStatus.approved, approved_by="web", approved_at=datetime.now(timezone.utc))
-    db.add(batch)
-    db.flush()
-
-    to_push: list[Transaction] = []
-    for t in txns:
-        # Pata POSITIVA de una transferencia (peer no synced): la representa la
-        # contraparte que Actual auto-crea al empujar la pata negativa → no se pushea.
-        if t.is_transfer and t.transfer_pair_id and t.amount > 0:
-            peer = db.get(Transaction, t.transfer_pair_id)
-            if peer is not None and peer.status != TxnStatus.synced:
-                t.status = TxnStatus.paired
-                continue
-        t.batch_id = batch.id
-        t.status = TxnStatus.approved
-        to_push.append(t)
-    db.commit()
-
-    artifact = build_batch_artifact(batch, to_push, approved_by="web", session=db)
-    write_artifact(artifact, ARTIFACTS_DIR)
-    
     redirect_url = f"/batches/{batch.id}"
     if request.query_params.get("auto_push") == "1":
         redirect_url += "?auto_push=1"
@@ -747,23 +716,7 @@ def batch_detail(batch_id: str, request: Request, db: Session = Depends(get_db),
 @app.post("/batches/{batch_id}/push")
 def push_batch(batch_id: str, request: Request, db: Session = Depends(get_db)):
     artifact_path = Path(ARTIFACTS_DIR) / f"batch-{batch_id}.json"
-    try:
-        proc = subprocess.run(
-            ["node", "push.js", str(artifact_path), "--commit"],
-            cwd=str(NODE_PUSHER),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        output = (proc.stdout or "") + (proc.stderr or "")
-        if proc.returncode == 0:
-            batch = db.get(Batch, batch_id)
-            batch.status = BatchStatus.pushed
-            for t in db.scalars(select(Transaction).where(Transaction.batch_id == batch_id)).all():
-                t.status = TxnStatus.synced
-            db.commit()
-    except Exception as e:  # noqa: BLE001
-        output = f"No se pudo ejecutar el worker Node: {e}\n(¿Corriste `npm install` en node-pusher?)"
+    _, output = push_batch_core(db, batch_id)
     return templates.TemplateResponse(
         request=request,
         name="batch_detail.html",

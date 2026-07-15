@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     anthropic_key: str = ""          # SPENDPIPE_ANTHROPIC_KEY
     ai_model: str = "claude-haiku-4-5"
 
+    # MCP (opcional): expone el pipeline como tools para claude.ai / ChatGPT.
+    # El servidor se monta bajo /mcp-<secret> (el path ES la autenticación, patrón
+    # Zapier-MCP: URL secreta sobre HTTPS). Sin secret, el MCP queda apagado.
+    mcp_secret: str = ""             # SPENDPIPE_MCP_SECRET
+
     @property
     def sqlalchemy_database_url(self) -> str:
         return _normalize_database_url(self.database_url)
