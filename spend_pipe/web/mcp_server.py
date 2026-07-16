@@ -23,6 +23,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from .. import ai
@@ -65,9 +66,54 @@ mcp = FastMCP(
 )
 
 
+# ── Esquemas de salida (output schema MCP: resultados estructurados) ────────
+class CuentaResumen(BaseModel):
+    cuenta: str
+    movimientos: int
+    desde: str
+    hasta: str
+    saldo: float
+
+
+class EstadoCuentas(BaseModel):
+    espejo_refrescado: str
+    cuentas: list[CuentaResumen]
+    staging_pendiente: dict[str, int]
+
+
+class Movimiento(BaseModel):
+    fecha: str
+    monto: float
+    payee: str | None
+    categoria: str | None
+    cuenta: str
+    actual_txn_id: str   # sirve para actualizar_transaccion / eliminar_transaccion
+
+
+class CategoriaTotal(BaseModel):
+    categoria: str
+    movimientos: int
+    total: float
+
+
+class ResumenCategorias(BaseModel):
+    desde: str
+    hasta: str
+    cuenta: str
+    categorias: list[CategoriaTotal]
+
+
+class ImportResumen(BaseModel):
+    import_id: str
+    archivo: str
+    banco: str
+    creado: str
+    status: dict[str, int]
+
+
 # ── Consultas (espejo de Actual) ─────────────────────────────────────────────
 @mcp.tool()
-def estado_cuentas() -> dict:
+def estado_cuentas() -> EstadoCuentas:
     """Saldos y cobertura por cuenta en Actual (según el espejo local), fecha del
     último refresh del espejo, y qué hay pendiente en staging."""
     with SessionLocal() as db:
@@ -86,18 +132,18 @@ def estado_cuentas() -> dict:
             .where(Transaction.status.in_([TxnStatus.needs_review, TxnStatus.normalized, TxnStatus.approved]))
             .group_by(Transaction.status)
         ).all()
-    return {
-        "espejo_refrescado": str(refreshed) if refreshed else "nunca (usa refrescar_espejo)",
-        "cuentas": [
-            {
-                "cuenta": r[0], "movimientos": r[1],
-                "desde": str(r[2]), "hasta": str(r[3]),
-                "saldo": round((r[4] or 0) / 100, 2),
-            }
+    return EstadoCuentas(
+        espejo_refrescado=str(refreshed) if refreshed else "nunca (usa refrescar_espejo)",
+        cuentas=[
+            CuentaResumen(
+                cuenta=r[0], movimientos=r[1],
+                desde=str(r[2]), hasta=str(r[3]),
+                saldo=round((r[4] or 0) / 100, 2),
+            )
             for r in rows
         ],
-        "staging_pendiente": {s.value: n for s, n in pendientes},
-    }
+        staging_pendiente={s.value: n for s, n in pendientes},
+    )
 
 
 @mcp.tool()
@@ -108,7 +154,7 @@ def buscar_transacciones(
     desde: str = "",
     hasta: str = "",
     limite: int = 50,
-) -> list[dict]:
+) -> list[Movimiento]:
     """Busca movimientos en Actual (espejo local). texto matchea payee/notas
     (case-insensitive), cuenta/categoria matchean por substring, desde/hasta
     son fechas ISO (YYYY-MM-DD)."""
@@ -126,19 +172,17 @@ def buscar_transacciones(
     with SessionLocal() as db:
         rows = db.scalars(q).all()
         return [
-            {
-                "fecha": str(m.date), "monto": m.amount_cents / 100,
-                "payee": m.payee_name, "categoria": m.category_name,
-                "cuenta": m.account_name,
-                # id de Actual: sirve para actualizar_transaccion / eliminar_transaccion
-                "actual_txn_id": m.actual_txn_id,
-            }
+            Movimiento(
+                fecha=str(m.date), monto=m.amount_cents / 100,
+                payee=m.payee_name, categoria=m.category_name,
+                cuenta=m.account_name, actual_txn_id=m.actual_txn_id,
+            )
             for m in rows
         ]
 
 
 @mcp.tool()
-def resumen_por_categoria(desde: str, hasta: str = "", cuenta: str = "") -> dict:
+def resumen_por_categoria(desde: str, hasta: str = "", cuenta: str = "") -> ResumenCategorias:
     """Total por categoría entre dos fechas ISO (hasta = hoy si se omite).
     Excluye transferencias vinculadas y padres de splits. Montos en la moneda
     de cada cuenta (ojo al mezclar cuentas MXN y EUR: filtra por cuenta)."""
@@ -157,16 +201,19 @@ def resumen_por_categoria(desde: str, hasta: str = "", cuenta: str = "") -> dict
         q = q.where(ActualMirror.account_name.ilike(f"%{cuenta}%"))
     with SessionLocal() as db:
         rows = db.execute(q).all()
-    return {
-        "desde": desde, "hasta": hasta or "hoy", "cuenta": cuenta or "todas",
-        "categorias": sorted(
+    return ResumenCategorias(
+        desde=desde, hasta=hasta or "hoy", cuenta=cuenta or "todas",
+        categorias=sorted(
             (
-                {"categoria": cat or "(sin categoría)", "movimientos": n, "total": round((s or 0) / 100, 2)}
+                CategoriaTotal(
+                    categoria=cat or "(sin categoría)", movimientos=n,
+                    total=round((s or 0) / 100, 2),
+                )
                 for cat, n, s in rows
             ),
-            key=lambda x: x["total"],
+            key=lambda x: x.total,
         ),
-    }
+    )
 
 
 @mcp.tool()
@@ -180,7 +227,7 @@ def refrescar_espejo() -> dict:
 
 # ── Staging / imports ────────────────────────────────────────────────────────
 @mcp.tool()
-def listar_imports() -> list[dict]:
+def listar_imports() -> list[ImportResumen]:
     """Imports en staging con desglose por status."""
     with SessionLocal() as db:
         imports = db.scalars(select(Import).order_by(Import.created_at.desc()).limit(20)).all()
@@ -191,11 +238,11 @@ def listar_imports() -> list[dict]:
                 .where(Transaction.import_id == imp.id)
                 .group_by(Transaction.status)
             ).all()
-            out.append({
-                "import_id": imp.id, "archivo": imp.source_file, "banco": imp.source_bank,
-                "creado": str(imp.created_at.date()),
-                "status": {s.value: n for s, n in counts},
-            })
+            out.append(ImportResumen(
+                import_id=imp.id, archivo=imp.source_file, banco=imp.source_bank,
+                creado=str(imp.created_at.date()),
+                status={s.value: n for s, n in counts},
+            ))
         return out
 
 
@@ -338,23 +385,36 @@ def confirmar_revision(txn_ids: list[str], categoria: str = "") -> dict:
 
 # ── Operaciones directas sobre Actual (node actual_ops.js) ──────────────────
 def _actual_op(cmd: dict, timeout: int = 180) -> dict:
-    proc = subprocess.run(
-        ["node", "actual_ops.js", json.dumps(cmd)],
-        cwd=str(NODE_PUSHER), capture_output=True, text=True, timeout=timeout,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"actual_ops falló: {(proc.stderr or '')[-400:]}")
+    """Corre actual_ops.js y devuelve SIEMPRE un dict: el resultado, o
+    {"error": ...} estructurado (nunca una excepción con logs de sync)."""
+    try:
+        proc = subprocess.run(
+            ["node", "actual_ops.js", json.dumps(cmd)],
+            cwd=str(NODE_PUSHER), capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": f"actual_ops tardó más de {timeout}s (op {cmd.get('op')})"}
+    # El script imprime una línea JSON en stdout tanto en éxito como en error.
     line = next((l for l in proc.stdout.splitlines() if l.strip().startswith("{")), None)
-    if line is None:
-        raise RuntimeError("actual_ops no produjo JSON")
-    return json.loads(line)
+    if line is not None:
+        return json.loads(line)
+    ruido = ("Breadcrumb", "Syncing", "Got messages", "spreadsheet", "Loading")
+    limpio = [l for l in (proc.stderr or "").splitlines() if l.strip() and not any(r in l for r in ruido)]
+    return {"error": f"actual_ops falló sin JSON: {' | '.join(limpio[-3:]) or 'sin detalle'}"}
 
 
 @mcp.tool()
-def saldos_actual() -> dict:
+def saldos_actual() -> dict[str, float]:
     """Saldos EN VIVO de todas las cuentas, directo de Actual (tarda ~30-60s;
     para consultas rápidas usa estado_cuentas, que lee el espejo local)."""
     return _actual_op({"op": "get_balances"})
+
+
+@mcp.tool()
+def listar_categorias() -> dict:
+    """Nombres EXACTOS de las categorías de Actual ('Grupo / Categoría').
+    Úsalos tal cual en crear_transaccion / actualizar_transaccion / confirmar_revision."""
+    return _actual_op({"op": "get_categories"})
 
 
 @mcp.tool()
@@ -430,7 +490,8 @@ def actualizar_transaccion(
     confirmar: bool = False,
 ) -> dict:
     """Edita categoría/payee/notas de una transacción existente en Actual.
-    El actual_txn_id sale de buscar_transacciones. Pide confirmar=true."""
+    El actual_txn_id sale de buscar_transacciones; la categoría debe ser un
+    nombre EXACTO de listar_categorias. Devuelve before/after. Pide confirmar=true."""
     if not confirmar:
         return {
             "dry_run": {"actual_txn_id": actual_txn_id, "categoria": categoria or None,

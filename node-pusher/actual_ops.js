@@ -34,12 +34,40 @@ function env(name) {
 async function resolveCategoryId(name) {
     // Acepta 'Grupo / Categoría' o solo 'Categoría' (incluye grupos de ingreso).
     const groups = await api.getCategoryGroups();
+    const disponibles = [];
     for (const g of groups) {
         for (const c of g.categories || []) {
             if (c.name === name || `${g.name} / ${c.name}` === name) return c.id;
+            if (!c.hidden) disponibles.push(`${g.name} / ${c.name}`);
         }
     }
-    throw new Error(`Categoría no encontrada: ${name}`);
+    throw new Error(
+        `Categoría no encontrada: '${name}'. Disponibles: ${disponibles.join(' | ')}`
+    );
+}
+
+async function resolvePayeeId(name) {
+    const payees = await api.getPayees();
+    const match = payees.find(p => (p.name || '').toLowerCase() === name.toLowerCase());
+    if (!match) throw new Error(`Payee no encontrado: '${name}' (para renombrar usa el nombre exacto de un payee existente)`);
+    return match.id;
+}
+
+async function getTxn(id) {
+    const { q } = api;
+    const res = await api.runQuery(
+        q('transactions')
+            .filter({ id })
+            .select(['id', 'date', 'amount', 'notes', 'payee.name', 'category.name', 'account.name'])
+    );
+    return (res.data && res.data[0]) || null;
+}
+
+function txnView(t) {
+    return t && {
+        fecha: t.date, monto: t.amount / 100, payee: t['payee.name'],
+        categoria: t['category.name'], notas: t.notes, cuenta: t['account.name'],
+    };
 }
 
 async function main() {
@@ -83,19 +111,50 @@ async function main() {
             break;
         }
         case 'update_transaction': {
+            const before = await getTxn(cmd.id);
+            if (!before) throw new Error(`not_found: no existe transacción con id ${cmd.id}`);
+            const acc = accounts.find(a => a.name === before['account.name']);
+            if (cmd.category && acc && acc.offbudget) {
+                throw new Error(
+                    `La cuenta '${acc.name}' es off-budget: Actual no acepta categorías ahí ` +
+                    '(la categoría se ignoraría en silencio)'
+                );
+            }
             const fields = {};
             if (cmd.category) fields.category = await resolveCategoryId(cmd.category);
-            if (cmd.payee) fields.payee_name = cmd.payee;
+            if (cmd.payee) fields.payee = await resolvePayeeId(cmd.payee);
             if (cmd.notes !== undefined && cmd.notes !== null) fields.notes = cmd.notes;
             if (Object.keys(fields).length === 0) throw new Error('Nada que actualizar');
             await api.updateTransaction(cmd.id, fields);
             out.updated = cmd.id;
+            out.before = txnView(before);
+            // OJO: no re-consultamos ('el motor AQL cachea la query del before y
+            // devuelve el valor viejo'); el after se construye con lo aplicado.
+            out.after = {
+                ...out.before,
+                ...(cmd.category ? { categoria: cmd.category } : {}),
+                ...(cmd.payee ? { payee: cmd.payee } : {}),
+                ...(cmd.notes !== undefined && cmd.notes !== null ? { notas: cmd.notes } : {}),
+            };
             break;
         }
         case 'delete_transaction': {
             // OJO: no cascadea a la contraparte de una transferencia vinculada.
+            const before = await getTxn(cmd.id);
+            if (!before) throw new Error(`not_found: no existe transacción con id ${cmd.id}`);
             await api.deleteTransaction(cmd.id);
             out.deleted = cmd.id;
+            out.era = txnView(before);
+            break;
+        }
+        case 'get_categories': {
+            const groups = await api.getCategoryGroups();
+            out.categorias = [];
+            for (const g of groups) {
+                for (const c of g.categories || []) {
+                    if (!c.hidden) out.categorias.push(`${g.name} / ${c.name}`);
+                }
+            }
             break;
         }
         default:
@@ -108,7 +167,9 @@ async function main() {
 
 main()
     .catch(err => {
-        console.error(err.message || err);
+        // El error viaja como JSON en stdout (stderr trae los logs de sync del
+        // SDK de Actual y no sirve como canal de error hacia el MCP).
+        process.stdout.write(JSON.stringify({ error: String(err.message || err) }) + '\n');
         process.exitCode = 1;
     })
     .finally(() => api.shutdown());
