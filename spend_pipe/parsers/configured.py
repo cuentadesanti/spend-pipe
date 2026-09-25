@@ -63,3 +63,8 @@ register(
         currency="EUR",
     )
 )
+
+# Revolut — CSV de la app (es/en). Una divisa por archivo; la cuenta es 'Revolut <divisa>'.
+from .revolut import RevolutCsvParser  # noqa: E402
+
+register(RevolutCsvParser())

@@ -23,12 +23,23 @@ import pdfplumber
 
 from ..schema import CommonTransaction
 from .errors import LayoutNotRecognizedError, ParseValidationError
+from ..statement import ParsedFile, StatementMeta
 
 _MONTHS = {"ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
            "JUL": 7, "AGO": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DIC": 12}
 _DATE = re.compile(r"^\d{2}/[A-Z]{3}$")
 _NUM = re.compile(r"^\d[\d,]*\.\d{2}$")
 _PERIODO = re.compile(r"DEL\s+\d{2}/(\d{2})/(\d{4})\s+AL\s+\d{2}/(\d{2})/(\d{4})")
+_PERIODO_FECHAS = re.compile(r"DEL\s+(\d{2})/(\d{2})/(\d{4})\s+AL\s+(\d{2})/(\d{2})/(\d{4})")
+
+
+def statement_period(text: str) -> tuple[date, date] | None:
+    """Fechas exactas del 'Periodo DEL dd/mm/aaaa AL dd/mm/aaaa'."""
+    m = _PERIODO_FECHAS.search(text)
+    if not m:
+        return None
+    d1, m1, y1, d2, m2, y2 = (int(g) for g in m.groups())
+    return date(y1, m1, d1), date(y2, m2, d2)
 _RE_ABONOS = re.compile(r"Abonos\s*\(\+\)\s+(\d+)\s+([\d,]+\.\d{2})")
 _RE_CARGOS = re.compile(r"Cargos\s*\(-\)\s+(\d+)\s+([\d,]+\.\d{2})")
 _RE_SALDO_ANT = re.compile(r"Saldo Anterior\s+([\d,]+\.\d{2})")
@@ -91,6 +102,9 @@ class BbvaPdfParser:
         self.currency = currency
 
     def parse(self, file_path: str) -> list[CommonTransaction]:
+        return self.parse_statement(file_path).transactions
+
+    def parse_statement(self, file_path: str) -> ParsedFile:
         lines: list[list[dict]] = []
         header: dict[str, dict] | None = None
         period: tuple[int, int, int, int] | None = None
@@ -152,7 +166,16 @@ class BbvaPdfParser:
             )
 
         validate_against_summary(txns, summary)   # el candado
-        return txns
+        period_dates = statement_period(full_text)
+        return ParsedFile(
+            txns,
+            StatementMeta(
+                period_from=period_dates[0] if period_dates else None,
+                period_to=period_dates[1] if period_dates else None,
+                opening_balance=summary.saldo_anterior,
+                ending_balance=summary.saldo_final,
+            ),
+        )
 
     @staticmethod
     def _parse_summary(full_text: str) -> StatementSummary:
