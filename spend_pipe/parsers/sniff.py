@@ -18,6 +18,8 @@ import io
 import re
 from dataclasses import dataclass, field
 
+from .revolut import revolut_columns
+
 
 @dataclass
 class Detection:
@@ -190,6 +192,12 @@ def detect_csv_text(text: str) -> Detection:
     hset = [h.lower() for h in headers]
 
     # ── Fingerprints exactos de formatos conocidos ──
+    if revolut_columns(headers):
+        return Detection(
+            kind="csv", source_bank="revolut", format="csv", source_account="Revolut",
+            parser_available=True, confidence="high", label="Revolut — extracto CSV",
+            csv_headers=headers, csv_delimiter=delimiter, csv_header_row=header_row,
+        )
     if headers == ["Date", "Payee", "Memo", "Amount"]:
         return Detection(
             kind="csv", source_bank="bbva-tdc", format="csv", source_account="BBVA TDC",
