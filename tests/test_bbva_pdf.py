@@ -75,3 +75,25 @@ def test_real_statement_parses_and_reconciles():
     # Año inferido del periodo (mayo y junio de 2026).
     assert {t.date.year for t in txns} == {2026}
     assert {t.date.month for t in txns} == {5, 6}
+
+
+def test_statement_period_reads_exact_days():
+    from datetime import date
+    from spend_pipe.parsers.bbva_pdf import statement_period
+
+    text = "Periodo DEL 28/05/2026 AL 27/06/2026 Fecha de corte"
+    assert statement_period(text) == (date(2026, 5, 28), date(2026, 6, 27))
+    assert statement_period("sin periodo") is None
+
+
+@pytest.mark.skipif(not os.path.exists(REAL_PDF), reason="PDF real no disponible")
+def test_real_statement_exposes_balances_and_period():
+    from spend_pipe.parsers import get_parser
+
+    parsed = get_parser("bbva-cuenta-digital", "pdf").parse_statement(REAL_PDF)
+    total = sum(t.amount for t in parsed.transactions)
+    assert parsed.meta.opening_balance is not None and parsed.meta.ending_balance is not None
+    assert parsed.meta.opening_balance + total == parsed.meta.ending_balance
+    start, end = parsed.period()
+    assert start <= min(t.date for t in parsed.transactions)
+    assert end >= max(t.date for t in parsed.transactions)
