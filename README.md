@@ -111,3 +111,15 @@ pytest -q
 - **MVP 1** manda el payee **crudo** a Actual para que sus 35 reglas sigan categorizando
   post-import. Las categorías se mueven al pipeline recién en MVP 3–4.
 - Secretos solo por `.env` (fuera de git). Rotar la password de PikaPods si tocó un repo.
+
+## Servicio de parseo para ledger-guard
+
+`POST /api/parse` recibe un extracto (multipart, campo `file`) y devuelve filas
+normalizadas con `imported_id`, periodo y saldos en céntimos, sin tocar staging.
+Se sirve con una app mínima sin base de datos:
+
+    uvicorn spend_pipe.parse_app:app --host 0.0.0.0 --port 8000
+
+Si `SPENDPIPE_PARSE_TOKEN` está definido, exige `Authorization: Bearer <token>`.
+Soporta los formatos con parser registrado: BBVA (PDF de cuenta y de tarjeta, CSV
+de tarjeta), Openbank (.xls de cuenta y de tarjeta) y Revolut (CSV).
