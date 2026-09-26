@@ -1,0 +1,21 @@
+# Servicio mínimo con solo POST /api/parse (para ledger-guard): sin base de datos,
+# sin migraciones y sin el worker de Node.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY spend_pipe ./spend_pipe
+COPY rules ./rules
+
+RUN pip install .
+
+EXPOSE 8000
+
+# HOST=:: si la red privada solo tiene IPv6 (uvicorn escucha en una única familia).
+CMD uvicorn spend_pipe.parse_app:app --host ${HOST:-0.0.0.0} --port $PORT
